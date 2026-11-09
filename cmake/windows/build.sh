@@ -57,6 +57,8 @@ done
 cmake_flags=(
     -G Ninja
     -DCMAKE_SYSTEM_NAME=Windows
+    # Connector/C uses the target processor for its _platform connection attribute.
+    -DCMAKE_SYSTEM_PROCESSOR=x86_64
     "-DCMAKE_C_COMPILER=$cc"
     "-DCMAKE_CXX_COMPILER=$cxx"
     -DCMAKE_BUILD_TYPE=Release

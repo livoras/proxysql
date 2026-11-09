@@ -142,7 +142,11 @@ mysql_users = ( { username="probe"; password="$password"; default_hostgroup=10; 
         throw 'Query did not report the backend outage within 10 seconds'
     }
     if ($failedQuery.ExitCode -eq 0 -or $proxy.HasExited) { throw 'Backend outage was not isolated to the query' }
-    Write-Output 'Query failed during backend outage while ProxySQL stayed up'
+    $outageError = (Get-Content "$Scratch/interruption.err" -Raw).Trim()
+    if ($outageError -notmatch "^ERROR (?:(?:2002|2003) \(HY000\) at line 1: Can't connect to|9001 \(HY000\) at line 1: Max connect timeout|9002 \(HY000\) at line 1: Max connect failure)") {
+        throw "Expected a backend connection error during the outage. Received: $outageError"
+    }
+    Write-Output "Query reported the backend outage while ProxySQL stayed up. $outageError"
 
     $backend = Start-Backend 2
     Wait-Listener $backend $BackendPort

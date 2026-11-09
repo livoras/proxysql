@@ -34,9 +34,9 @@ For the smoke test, use a MySQL 8.0 server distribution with `mysqld.exe`,
 `mysql.exe`, and `mysqladmin.exe`. The script uses loopback and three free
 ports. It initializes a scratch backend, checks the initial protocol packet
 and the SQL admin interface, and reads a backend table through ProxySQL.
-It stops and restarts the scratch backend to verify that the same ProxySQL
-process resumes forwarding. The logs and scratch data are left under the
-printed directory.
+It checks the client error while the scratch backend is stopped and confirms
+that the same ProxySQL process resumes forwarding after the backend restarts.
+The logs and scratch data are left under the printed directory.
 
 ## Platform scope
 
