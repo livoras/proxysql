@@ -1,7 +1,7 @@
 #ifndef __CLASS_PROXYSQL_POLL
 #define __CLASS_PROXYSQL_POLL
 
-//#include "MySQL_Data_Stream.h"
+#include "proxysql_socket.h"
 
 class iface_info {
 	public:
@@ -42,8 +42,8 @@ class ProxySQL_Poll {
 
 	ProxySQL_Poll();
 	~ProxySQL_Poll();
-	void add(uint32_t _events, int _fd, MySQL_Data_Stream *_myds, unsigned long long sent_time);
+	void add(uint32_t _events, ProxySQL_Socket _fd, MySQL_Data_Stream *_myds, unsigned long long sent_time);
 	void remove_index_fast(unsigned int i);
-	int find_index(int fd);
+	int find_index(ProxySQL_Socket fd);
 };
 #endif // __CLASS_PROXYSQL_POLL

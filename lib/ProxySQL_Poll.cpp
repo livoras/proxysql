@@ -5,7 +5,6 @@
 #include "MySQL_Data_Stream.h"
 #include "ProxySQL_Poll.h"
 #include "proxysql_structs.h"
-#include <poll.h>
 #include "cpp.h"
 
 
@@ -103,7 +102,7 @@ ProxySQL_Poll::~ProxySQL_Poll() {
  * @param _myds The MySQL_Data_Stream associated with the FD.
  * @param sent_time The time when data was last sent on the FD.
  */
-void ProxySQL_Poll::add(uint32_t _events, int _fd, MySQL_Data_Stream *_myds, unsigned long long sent_time) {
+void ProxySQL_Poll::add(uint32_t _events, ProxySQL_Socket _fd, MySQL_Data_Stream *_myds, unsigned long long sent_time) {
 	if (len==size) {
 		expand(1);
 	}
@@ -155,7 +154,7 @@ void ProxySQL_Poll::remove_index_fast(unsigned int i) {
  * @param fd The file descriptor (FD) to search for.
  * @return The index of the file descriptor (FD) if found, otherwise -1.
  */
-int ProxySQL_Poll::find_index(int fd) {
+int ProxySQL_Poll::find_index(ProxySQL_Socket fd) {
 	unsigned int i;
 	for (i=0; i<len; i++) {
 		if (fds[i].fd==fd) {

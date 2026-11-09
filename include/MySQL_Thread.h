@@ -7,6 +7,7 @@
 #include "proxysql.h"
 #include "cpp.h"
 #include "MySQL_Variables.h"
+#include "ProxySQL_Thread_Wakeup.h"
 #ifdef IDLE_THREADS
 #include <sys/epoll.h>
 #endif // IDLE_THREADS
@@ -138,7 +139,7 @@ class __attribute__((aligned(64))) MySQL_Thread
 	void handle_kill_queues();
 	void check_timing_out_session(unsigned int n);
 	void check_for_invalid_fd(unsigned int n);
-	void read_one_byte_from_pipe(unsigned int n);
+	void read_wakeup();
 	void tune_timeout_for_myds_needs_pause(MySQL_Data_Stream *myds);
 	void tune_timeout_for_session_needs_pause(MySQL_Data_Stream *myds);
 	void configure_pollout(MySQL_Data_Stream *myds, unsigned int n);
@@ -174,7 +175,7 @@ class __attribute__((aligned(64))) MySQL_Thread
 	conn_exchange_t myexchange;
 #endif // IDLE_THREADS
 
-	int pipefd[2];
+	ProxySQL_Thread_Wakeup wakeup;
 	int shutdown;
 	kill_queue_t kq;
 

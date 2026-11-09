@@ -2999,7 +2999,6 @@ MySQL_Session * MySQL_Thread::create_new_session_and_client_data_stream(int _fd)
 }
 
 bool MySQL_Thread::init() {
-	int i;
 	mysql_sessions = new PtrArray();
 	mirror_queue_mysql_sessions = new PtrArray();
 	mirror_queue_mysql_sessions_cache = new PtrArray();
@@ -3027,11 +3026,11 @@ bool MySQL_Thread::init() {
 	memset(my_idle_conns,0,sizeof(MySQL_Connection *)*SESSIONS_FOR_CONNECTIONS_HANDLER);
 	GloQPro->init_thread();
 	refresh_variables();
-	i=pipe(pipefd);
-	ioctl_FIONBIO(pipefd[0],1);
-	ioctl_FIONBIO(pipefd[1],1);
-	mypolls.add(POLLIN, pipefd[0], NULL, 0);
-	assert(i==0);
+	if (!wakeup.open()) {
+		proxy_error("Unable to create MySQL worker wakeup endpoints\n");
+		abort();
+	}
+	mypolls.add(POLLIN, wakeup.reader(), nullptr, 0);
 
 	thr_SetParser = new SetParser("");
 	match_regexes=(Session_Regex **)malloc(sizeof(Session_Regex *)*4);
@@ -3181,7 +3180,7 @@ void MySQL_Thread::ProcessAllMyDS_BeforePoll() {
 				configure_pollout(myds, n);
 			}
 		}
-		proxy_debug(PROXY_DEBUG_NET,1,"Poll for DataStream=%p will be called with FD=%d and events=%d\n", mypolls.myds[n], mypolls.fds[n].fd, mypolls.fds[n].events);
+		proxy_debug(PROXY_DEBUG_NET,1,"Poll for DataStream=%p will be called with FD=%lld and events=%d\n", mypolls.myds[n], static_cast<long long>(mypolls.fds[n].fd), mypolls.fds[n].events);
 	}
 }
 
@@ -3200,11 +3199,13 @@ void MySQL_Thread::ProcessAllMyDS_BeforePoll() {
  */
 void MySQL_Thread::ProcessAllMyDS_AfterPoll() {
 	for (unsigned int n = 0; n < mypolls.len; n++) {
-		proxy_debug(PROXY_DEBUG_NET,3, "poll for fd %d events %d revents %d\n", mypolls.fds[n].fd , mypolls.fds[n].events, mypolls.fds[n].revents);
+		proxy_debug(PROXY_DEBUG_NET,3, "poll for fd %lld events %d revents %d\n", static_cast<long long>(mypolls.fds[n].fd), mypolls.fds[n].events, mypolls.fds[n].revents);
 
 		MySQL_Data_Stream *myds=mypolls.myds[n];
 		if (myds==NULL) {
-			read_one_byte_from_pipe(n);
+			if (mypolls.fds[n].revents) {
+				read_wakeup();
+			}
 			continue;
 		}
 		if (mypolls.fds[n].revents==0) {
@@ -3291,10 +3292,7 @@ void MySQL_Thread::run_Handle_epoll_wait(int rc) {
 		for (i=0; i<rc; i++) {
 			if (events[i].events == EPOLLIN && events[i].data.u32==0) {
 				unsigned char c;
-				int fd=pipefd[0];
-				if (read(fd, &c, 1)<=0) {
-				} else {
-					//i=rc;
+				if (wakeup.receive(c) > 0) {
 					maintenance_loop=true;
 				}
 			}
@@ -3396,12 +3394,11 @@ void MySQL_Thread::run() {
 		// we check if it is the first time we are called
 		if (efd==-1) {
 			efd = EPOLL_CREATE;
-			int fd=pipefd[0];
 			struct epoll_event event;
 			memset(&event,0,sizeof(event)); // let's make valgrind happy
 			event.events = EPOLLIN;
 			event.data.u32=0; // special value to point to the pipe
-			epoll_ctl(efd, EPOLL_CTL_ADD, fd, &event);
+			epoll_ctl(efd, EPOLL_CTL_ADD, wakeup.reader(), &event);
 		}
 	}
 #endif // IDLE_THREADS
@@ -3461,7 +3458,7 @@ __run_skip_1:
 		//this is the only portion of code not protected by a global mutex
 		proxy_debug(PROXY_DEBUG_NET,5,"Calling poll with timeout %d\n", ttw );
 		// poll is called with a timeout of mypolls.poll_timeout if set , or mysql_thread___poll_timeout
-		rc=poll(mypolls.fds,mypolls.len, ttw);
+		rc=proxysql_poll(mypolls.fds, mypolls.len, ttw);
 		proxy_debug(PROXY_DEBUG_NET,5,"%s\n", "Returning poll");
 #ifdef IDLE_THREADS
 		}
@@ -3658,11 +3655,7 @@ void MySQL_Thread::idle_thread_prepares_session_to_send_to_worker_thread(int i) 
 void MySQL_Thread::idle_thread_check_if_worker_thread_has_unprocess_resumed_sessions_and_signal_it(MySQL_Thread *thr) {
 	pthread_mutex_lock(&thr->myexchange.mutex_resumes);
 	if (shutdown==0 && thr->shutdown==0 && thr->myexchange.resume_mysql_sessions->len) {
-		unsigned char c=0;
-		int fd=thr->pipefd[1];
-		if (write(fd,&c,1)==-1) {
-			//proxy_error("Error while signaling maintenance thread\n");
-		}
+		thr->wakeup.signal(0);
 	}
 	pthread_mutex_unlock(&thr->myexchange.mutex_resumes);
 }
@@ -3693,13 +3686,7 @@ void MySQL_Thread::idle_thread_assigns_sessions_to_worker_thread(MySQL_Thread *t
 	}
 	pthread_mutex_unlock(&thr->myexchange.mutex_resumes);
 	if (send_signal) { // signal only if there are sessions to resume
-		unsigned char c=0;
-		//MySQL_Thread *thr=GloMTH->mysql_threads[w].worker;
-		// we signal the thread to inform there are sessions
-		int fd=thr->pipefd[1];
-		if (write(fd,&c,1)==-1) {
-			//proxy_error("Error while signaling maintenance thread\n");
-		}
+		thr->wakeup.signal(0);
 	}
 }
 
@@ -3729,11 +3716,7 @@ void MySQL_Thread::worker_thread_assigns_sessions_to_idle_thread(MySQL_Thread *t
 		}
 		pthread_mutex_unlock(&thr->myexchange.mutex_idles);
 		if (empty_queue==true) {
-			unsigned char c=1;
-			int fd=thr->pipefd[1];
-			if (write(fd,&c,1)==-1) {
-				//proxy_error("Error while signaling maintenance thread\n");
-			}
+			thr->wakeup.signal(1);
 		}
 	}
 }
@@ -3865,7 +3848,7 @@ bool MySQL_Thread::process_data_on_data_stream(MySQL_Data_Stream *myds, unsigned
 										_fds.fd = mypolls.fds[n].fd;
 										_fds.events = POLLIN;
 										_fds.revents = 0;
-										int _rc = poll(&_fds, _nfds, 0);
+										int _rc = proxysql_poll(&_fds, _nfds, 0);
 										if ((_rc > 0) && _fds.revents == POLLIN) {
 											// there is more data
 											myds->revents = _fds.revents;
@@ -5378,8 +5361,7 @@ void MySQL_Threads_Handler::signal_all_threads(unsigned char _c) {
 	for (i=0;i<num_threads;i++) {
 		MySQL_Thread *thr=(MySQL_Thread *)mysql_threads[i].worker;
 		if (thr==NULL) return; // quick exit, at least one thread is not ready
-		int fd=thr->pipefd[1];
-		if (write(fd,&c,1)==-1) {
+		if (thr->wakeup.signal(c) == -1) {
 			proxy_error("Error during write in signal_all_threads()\n");
 		}
 	}
@@ -5388,8 +5370,7 @@ void MySQL_Threads_Handler::signal_all_threads(unsigned char _c) {
 	for (i=0;i<num_threads;i++) {
 		MySQL_Thread *thr=(MySQL_Thread *)mysql_threads_idles[i].worker;
 		if (thr==NULL) return; // quick exit, at least one thread is not ready
-		int fd=thr->pipefd[1];
-		if (write(fd,&c,1)==-1) {
+		if (thr->wakeup.signal(c) == -1) {
 			proxy_error("Error during write in signal_all_threads()\n");
 		}
 	}
@@ -6155,33 +6136,28 @@ void MySQL_Thread::check_for_invalid_fd(unsigned int n) {
 		MySQL_Data_Stream *_myds=mypolls.myds[n];
 		if (_myds) {
 			if (_myds->myconn) {
-				proxy_error("revents==POLLNVAL for FD=%d, events=%d, MyDSFD=%d, MyConnFD=%d\n", mypolls.fds[n].fd, mypolls.fds[n].events, _myds->fd, _myds->myconn->fd);
+				proxy_error("revents==POLLNVAL for FD=%lld, events=%d, MyDSFD=%d, MyConnFD=%d\n", static_cast<long long>(mypolls.fds[n].fd), mypolls.fds[n].events, _myds->fd, _myds->myconn->fd);
 				assert(mypolls.fds[n].revents!=POLLNVAL);
 			}
 		}
 		// if we reached her, we didn't assert() yet
-		proxy_error("revents==POLLNVAL for FD=%d, events=%d, MyDSFD=%d\n", mypolls.fds[n].fd, mypolls.fds[n].events, _myds->fd);
+		proxy_error("revents==POLLNVAL for FD=%lld, events=%d\n", static_cast<long long>(mypolls.fds[n].fd), mypolls.fds[n].events);
 		assert(mypolls.fds[n].revents!=POLLNVAL);
 	}
 }
 
-void MySQL_Thread::read_one_byte_from_pipe(unsigned int n) {
-	if (mypolls.fds[n].revents) {
-		unsigned char c;
-		if (read(mypolls.fds[n].fd, &c, 1)==-1) {// read just one byte
-			proxy_error("Error during read from signal_all_threads()\n");
-		}
-		proxy_debug(PROXY_DEBUG_GENERIC,3, "Got signal from admin , done nothing\n");
-		//fprintf(stderr,"Got signal from admin , done nothing\n"); // FIXME: this is just the skeleton for issue #253
-		if (c) {
-			// we are being signaled to sleep for some ms. Before going to sleep we also release the mutex
-			pthread_mutex_unlock(&thread_mutex);
-			usleep(c*1000);
-			pthread_mutex_lock(&thread_mutex);
-			// we enter in maintenance loop only if c is set
-			// when threads are signaling each other, there is no need to set maintenance_loop
-			maintenance_loop=true;
-		}
+void MySQL_Thread::read_wakeup() {
+	unsigned char delay;
+	const int result = wakeup.receive(delay);
+	if (result < 0) {
+		proxy_error("Error while reading a MySQL worker wakeup signal\n");
+	}
+	if (result == 1 && delay != 0) {
+		// A nonzero signal also requests a maintenance pass after this delay.
+		pthread_mutex_unlock(&thread_mutex);
+		usleep(delay * 1000);
+		pthread_mutex_lock(&thread_mutex);
+		maintenance_loop = true;
 	}
 }
 
