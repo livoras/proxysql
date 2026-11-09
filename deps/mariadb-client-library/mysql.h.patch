@@ -7,7 +7,7 @@ index 76b16830..9ee86227 100644
  const char * STDCALL mysql_character_set_name(MYSQL *mysql);
  void STDCALL mysql_get_character_set_info(MYSQL *mysql, MY_CHARSET_INFO *cs);
 -int STDCALL mysql_set_character_set(MYSQL *mysql, const char *csname);
-+int STDCALL mysql_set_character_set(MYSQL *mysql, const char *csname, uint charsetnr);
++int STDCALL mysql_set_character_set(MYSQL *mysql, const char *csname, unsigned int charsetnr);
  
  my_bool mariadb_get_infov(MYSQL *mysql, enum mariadb_value value, void *arg, ...);
  my_bool STDCALL mariadb_get_info(MYSQL *mysql, enum mariadb_value value, void *arg);
@@ -24,7 +24,7 @@ index 76b16830..9ee86227 100644
  
  int STDCALL mysql_set_character_set_start(int *ret, MYSQL *mysql,
 -                                                   const char *csname);
-+                                                   const char *csname, uint charsetnr);
++                                                   const char *csname, unsigned int charsetnr);
  int STDCALL mysql_set_character_set_cont(int *ret, MYSQL *mysql,
                                                    int status);
  int STDCALL mysql_change_user_start(my_bool *ret, MYSQL *mysql,
@@ -33,7 +33,7 @@ index 76b16830..9ee86227 100644
    const char * (STDCALL *mysql_character_set_name)(MYSQL *mysql);
    void (STDCALL *mysql_get_character_set_info)(MYSQL *mysql, MY_CHARSET_INFO *cs);
 -  int (STDCALL *mysql_set_character_set)(MYSQL *mysql, const char *csname);
-+  int (STDCALL *mysql_set_character_set)(MYSQL *mysql, const char *csname, uint charsetnr);
++  int (STDCALL *mysql_set_character_set)(MYSQL *mysql, const char *csname, unsigned int charsetnr);
    my_bool (*mariadb_get_infov)(MYSQL *mysql, enum mariadb_value value, void *arg, ...);
    my_bool (STDCALL *mariadb_get_info)(MYSQL *mysql, enum mariadb_value value, void *arg);
    MYSQL * (STDCALL *mysql_init)(MYSQL *mysql);

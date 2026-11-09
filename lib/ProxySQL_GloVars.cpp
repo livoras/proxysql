@@ -2,7 +2,9 @@
 #include "proxysql.h"
 #include "cpp.h"
 #include <string>
+#ifndef _WIN32
 #include <sys/utsname.h>
+#endif
 #include "prometheus/registry.h"
 #ifndef SPOOKYV2
 #include "SpookyV2.h"
@@ -10,7 +12,7 @@
 #endif
 
 #include <cxxabi.h>
-#include <uuid/uuid.h>
+#include "proxysql_uuid.h"
 
 #include "MySQL_LDAP_Authentication.hpp"
 
@@ -82,7 +84,11 @@ void crash_handler(int sig) {
 #endif /* __GLIBC__ */
 	// try to generate a core dump signaling again the thread
 	signal(sig, SIG_DFL);
+#ifdef _WIN32
+	raise(sig);
+#else
 	pthread_kill(pthread_self(), sig);
+#endif
 }
 
 ProxySQL_GlobalVariables::~ProxySQL_GlobalVariables() {
@@ -311,12 +317,16 @@ ProxySQL_GlobalVariables::ProxySQL_GlobalVariables() :
 };
 
 void ProxySQL_GlobalVariables::install_signal_handler() {
+#ifdef _WIN32
+	signal(SIGINT, term_handler);
+#else
 	signal(SIGUSR1, log_handler);
+	signal(SIGPIPE, SIG_IGN);
+#endif
 	signal(SIGTERM, term_handler);
 	signal(SIGSEGV, crash_handler);
 	signal(SIGABRT, crash_handler);
 	signal(SIGFPE, crash_handler);
-	signal(SIGPIPE, SIG_IGN);
 }
 
 void ProxySQL_GlobalVariables::parse(int argc, const char * argv[]) {
@@ -334,7 +344,9 @@ void update_string_var_if_set(char** cur_val, ez::ezOptionParser* opt, const cha
 
 void update_ulong_var_if_set(uint64_t& cur_val, ez::ezOptionParser* opt, const char* cmd_opt) {
 	if (opt->isSet(cmd_opt)) {
-		opt->get(cmd_opt)->getULong(cur_val);
+		unsigned long long value;
+		opt->get(cmd_opt)->getULongLong(value);
+		cur_val = value;
 	}
 }
 
@@ -469,9 +481,9 @@ void ProxySQL_GlobalVariables::process_opts_post() {
 
 	if (opt->isSet("-f")) {
 		global.foreground=true;
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(_WIN32)
 	} else {
-		proxy_warning("ProxySQL does not support daemonize in Darwin: running in foreground\n");
+		proxy_info("Running ProxySQL in foreground mode\n");
 		global.foreground=true;
 #endif
 	}

@@ -42,7 +42,7 @@ index 916024a8..79564a10 100644
  #include <openssl/conf.h>
  #include <openssl/md4.h>
  
-+#include <sys/mman.h>
++#include <fcntl.h>
 +#include <sys/types.h>
 +#include <sys/stat.h>
 +#include <unistd.h>
@@ -50,7 +50,7 @@ index 916024a8..79564a10 100644
  #if defined(_WIN32) && !defined(_OPENSSL_Applink) && defined(HAVE_OPENSSL_APPLINK_C)
  #include <openssl/applink.c>
  #endif
-@@ -70,6 +75,89 @@
+@@ -70,6 +75,93 @@
  extern my_bool ma_tls_initialized;
  extern unsigned int mariadb_deinitialize_ssl;
  
@@ -67,7 +67,11 @@ index 916024a8..79564a10 100644
 +  char file_sha1[SHA_DIGEST_LENGTH*2+2];
 +  memset(file_sha1,0,SHA_DIGEST_LENGTH*2+2);
 +
++#ifdef _WIN32
++  fd = open(CAfile, O_RDONLY | O_BINARY);
++#else
 +  fd = open(CAfile, O_RDONLY);
++#endif
 +  if (fd == -1) return 0;
 +
 +  if(fstat(fd, &statbuf) == 0) {
@@ -78,7 +82,7 @@ index 916024a8..79564a10 100644
 +      return 0;
 +    }
 +    // Read the file into the buffer
-+    bytesRead = pread(fd, fb, statbuf.st_size, 0);
++    bytesRead = read(fd, fb, statbuf.st_size);
 +    if (bytesRead != statbuf.st_size) {
 +      free(fb);
 +      close(fd);

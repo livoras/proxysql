@@ -42,9 +42,10 @@
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
-#include <sys/socket.h>
+#ifndef _WIN32
 #include <resolv.h>
-#include <arpa/inet.h>
+#include <sys/utsname.h>
+#endif
 #include <pthread.h>
 #ifndef SPOOKYV2
 #include "SpookyV2.h"
@@ -52,9 +53,10 @@
 #endif
 
 #include <fcntl.h>
-#include <sys/utsname.h>
 
+#ifndef _WIN32
 #include "platform.h"
+#endif
 #include "microhttpd.h"
 
 #if (defined(__i386__) || defined(__x86_64__) || defined(__ARM_ARCH_3__) || defined(__mips__)) && defined(__linux)
@@ -62,7 +64,7 @@
 #include "coredumper/coredumper.h"
 #endif
 
-#include <uuid/uuid.h>
+#include "proxysql_uuid.h"
 
 using std::string;
 using std::unique_ptr;
@@ -208,7 +210,7 @@ static int round_intv_to_time_interval(const char* name, int _intv) {
 typedef struct _arg_mysql_adm_t {
 	struct sockaddr * addr;
 	socklen_t addr_size;
-	int client_t;
+	ProxySQL_Socket client_t;
 } arg_mysql_adm;
 
 void StringToHex(unsigned char *string, unsigned char *hexstring, size_t l) {
@@ -323,7 +325,6 @@ extern int ProxySQL_create_or_load_TLS(bool bootstrap, std::string& msg);
 
 #define PANIC(msg)  { perror(msg); exit(EXIT_FAILURE); }
 
-pthread_mutex_t sock_mutex = PTHREAD_MUTEX_INITIALIZER;
 //pthread_mutex_t admin_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t users_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -332,7 +333,7 @@ std::unordered_map<std::string, void *> map_test_mysql_firewall_whitelist_rules;
 char rand_del[6];
 
 //static int http_handler(void *cls, struct MHD_Connection *connection, const char *url, const char *method, const char *version, const char *upload_data, size_t *upload_data_size, void **ptr) {
-MHD_Result http_handler(void *cls, struct MHD_Connection *connection, const char *url, const char *method, const char *version, const char *upload_data, long unsigned int *upload_data_size, void **ptr) {
+MHD_Result http_handler(void *cls, struct MHD_Connection *connection, const char *url, const char *method, const char *version, const char *upload_data, size_t *upload_data_size, void **ptr) {
 	return (MHD_Result) GloAdmin->AdminHTTPServer->handler(cls, connection, url, method, version, upload_data, upload_data_size, ptr);
 }
 
@@ -5569,7 +5570,7 @@ void *child_mysql(void *arg) {
 	}
 
 	arg_mysql_adm *myarg = (arg_mysql_adm *)arg;
-	int client = myarg->client_t;
+	ProxySQL_Socket client = myarg->client_t;
 
 	//struct sockaddr *addr = arg->addr;
 	//socklen_t addr_size;
@@ -5583,9 +5584,8 @@ void *child_mysql(void *arg) {
 	GloMTH->wrunlock();
 
 	struct pollfd fds[1];
-	nfds_t nfds=1;
+	unsigned int nfds=1;
 	int rc;
-	pthread_mutex_unlock(&sock_mutex);
 	MySQL_Thread *mysql_thr=new MySQL_Thread();
 	mysql_thr->curtime=monotonic_time();
 	GloQPro->init_thread();
@@ -5636,7 +5636,7 @@ void *child_mysql(void *arg) {
 			fds[0].events=POLLIN;
 		}
 		fds[0].revents=0;
-		rc=poll(fds,nfds,__sync_fetch_and_add(&__admin_refresh_interval,0));
+		rc=proxysql_poll(fds,nfds,__sync_fetch_and_add(&__admin_refresh_interval,0));
 		if (rc == -1) {
 			if (errno == EINTR) {
 				continue;
@@ -5681,49 +5681,49 @@ void* child_telnet(void* arg)
 {
 	int bytes_read;
 	char line[LINESIZE+1];
-	int client = *(int *)arg;
+	ProxySQL_Socket client = static_cast<arg_mysql_adm *>(arg)->client_t;
+	free(static_cast<arg_mysql_adm *>(arg)->addr);
 	free(arg);
-	pthread_mutex_unlock(&sock_mutex);
 	memset(line,0,LINESIZE+1);
 	while ((strncmp(line, "quit", 4) != 0) && glovars.shutdown==0) {
-		bytes_read = recv(client, line, LINESIZE, 0);
-		  if (bytes_read==-1) {
+		bytes_read = proxysql_socket_recv(client, line, LINESIZE);
+		  if (bytes_read <= 0) {
 			 break;
 			 }
 		  char *eow = strchr(line, '\n');
 			if (eow) *eow=0;
 			//SPA->is_command(line);
 			if (strncmp(line,"shutdown",8)==0) glovars.shutdown=1;
-		  if (send(client, line, strlen(line), MSG_NOSIGNAL)==-1) break;
-		  if (send(client, "\nOK\n", 4, MSG_NOSIGNAL)==-1) break;
+		  if (proxysql_socket_send(client, line, strlen(line))==-1) break;
+		  if (proxysql_socket_send(client, "\nOK\n", 4)==-1) break;
 	}
-	shutdown(client,SHUT_RDWR);
-	close(client);
-	return arg;
+	shutdown(client, PROXYSQL_SHUT_RDWR);
+	proxysql_socket_close(client);
+	return nullptr;
 }
 
 void* child_telnet_also(void* arg)
 {
 	int bytes_read;
 	char line[LINESIZE+1];
-	int client = *(int *)arg;
+	ProxySQL_Socket client = static_cast<arg_mysql_adm *>(arg)->client_t;
+	free(static_cast<arg_mysql_adm *>(arg)->addr);
 	free(arg);
-	pthread_mutex_unlock(&sock_mutex);
 	memset(line,0,LINESIZE+1);
 	while ((strncmp(line, "quit", 4) != 0) && glovars.shutdown==0) {
-		bytes_read = recv(client, line, LINESIZE, 0);
-		  if (bytes_read==-1) {
+		bytes_read = proxysql_socket_recv(client, line, LINESIZE);
+		  if (bytes_read <= 0) {
 			 break;
 			 }
 		  char *eow = strchr(line, '\n');
 			if (eow) *eow=0;
 			if (strncmp(line,"shutdown",8)==0) glovars.shutdown=1;
-		  if (send(client, line, strlen(line), MSG_NOSIGNAL)==-1) break;
-		  if (send(client, "\nNOT OK\n", 8, MSG_NOSIGNAL)==-1) break;
+		  if (proxysql_socket_send(client, line, strlen(line))==-1) break;
+		  if (proxysql_socket_send(client, "\nNOT OK\n", 8)==-1) break;
 	}
-	shutdown(client,SHUT_RDWR);
-	close(client);
-	return arg;
+	shutdown(client, PROXYSQL_SHUT_RDWR);
+	proxysql_socket_close(client);
+	return nullptr;
 }
 
 static void * admin_main_loop(void *arg)
@@ -5735,6 +5735,7 @@ static void * admin_main_loop(void *arg)
 	int nfds=((struct _main_args *)arg)->nfds;
 	int *callback_func=((struct _main_args *)arg)->callback_func;
 	volatile int *shutdown=((struct _main_args *)arg)->shutdown;
+	fds[nfds++] = { GloAdmin->poll_wakeup_handle(), POLLIN, 0 };
 	char *socket_names[MAX_ADMIN_LISTENERS];
 	set_thread_name("Admin");
 	for (i=0;i<MAX_ADMIN_LISTENERS;i++) { socket_names[i]=NULL; }
@@ -5764,7 +5765,7 @@ static void * admin_main_loop(void *arg)
 			poll_wait=500000;
 		}
 		poll_wait=poll_wait/1000;	// conversion to millisecond
-		rc=poll(fds,nfds,poll_wait);
+		rc=proxysql_poll(fds,nfds,poll_wait);
 		if ((nostart_ && __sync_val_compare_and_swap(&GloVars.global.nostart,0,1)==0) || __sync_fetch_and_add(&glovars.shutdown,0)==1) {
 			nostart_=false;
 			pthread_mutex_unlock(&GloVars.global.start_mutex);
@@ -5774,7 +5775,7 @@ static void * admin_main_loop(void *arg)
 			goto __end_while_pool;
 		}
 		for (i=1;i<nfds;i++) {
-			if (fds[i].revents==POLLIN) {
+			if (fds[i].revents & POLLIN) {
 				arg_mysql_adm *passarg = (arg_mysql_adm *)malloc(sizeof(arg_mysql_adm));
 				union {
 					struct sockaddr_in in;
@@ -5784,10 +5785,14 @@ static void * admin_main_loop(void *arg)
 				passarg->addr_size = sizeof(custom_sockaddr);
 				memset(passarg->addr, 0, sizeof(custom_sockaddr));
 				passarg->client_t = accept(fds[i].fd, (struct sockaddr*)passarg->addr, &passarg->addr_size);
+				if (passarg->client_t == PROXYSQL_INVALID_SOCKET) {
+					free(passarg->addr);
+					free(passarg);
+					continue;
+				}
 //		printf("Connected: %s:%d  sock=%d\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), client_t);
 				pthread_attr_getstacksize (&attr, &stacks);
 //		printf("Default stack size = %d\n", stacks);
-				pthread_mutex_lock (&sock_mutex);
 				//client=(int *)malloc(sizeof(int));
 				//*client= client_t;
 				//if ( pthread_create(&child, &attr, child_func[callback_func[i]], client) != 0 ) {
@@ -5871,7 +5876,7 @@ __end_while_pool:
 			version=S_amll.get_version();
 			for (i=1; i<nfds; i++) {
 				char *add=NULL; char *port=NULL;
-				close(fds[i].fd);
+				proxysql_socket_close(fds[i].fd);
 				c_split_2(socket_names[i], ":" , &add, &port);
 				if (atoi(port)==0) {
 					if (socket_names[i]) {
@@ -5881,7 +5886,7 @@ __end_while_pool:
 				}
 			}
 			nfds=0;
-			fds[nfds].fd=GloAdmin->pipefd[0];
+			fds[nfds].fd=GloAdmin->poll_wakeup_handle();
 			fds[nfds].events=POLLIN;
 			fds[nfds].revents=0;
 			nfds++;
@@ -5907,11 +5912,11 @@ __end_while_pool:
 				}
 
 #ifdef SO_REUSEPORT
-				int s = ( atoi(port) ? listen_on_port(add, atoi(port), 128, true) : listen_on_unix(add, 128));
+				ProxySQL_Socket s = ( atoi(port) ? listen_on_port(add, atoi(port), 128, true) : listen_on_unix(add, 128));
 #else
-				int s = ( atoi(port) ? listen_on_port(add, atoi(port), 128) : listen_on_unix(add, 128));
+				ProxySQL_Socket s = ( atoi(port) ? listen_on_port(add, atoi(port), 128) : listen_on_unix(add, 128));
 #endif
-				if (s>0) { fds[nfds].fd=s; fds[nfds].events=POLLIN; fds[nfds].revents=0; callback_func[nfds]=0; socket_names[nfds]=strdup(sn); nfds++; }
+				if (s != PROXYSQL_INVALID_SOCKET) { fds[nfds].fd=s; fds[nfds].events=POLLIN; fds[nfds].revents=0; callback_func[nfds]=0; socket_names[nfds]=strdup(sn); nfds++; }
 				if (is_ipv6 == false) {
 					if (add) free(add);
 					if (port) free(port);
@@ -5922,9 +5927,9 @@ __end_while_pool:
 
 	}
 	//if (__sync_add_and_fetch(shutdown,0)==0) __sync_add_and_fetch(shutdown,1);
-	for (i=0; i<nfds; i++) {
+	for (i=1; i<nfds; i++) {
 		char *add=NULL; char *port=NULL;
-		close(fds[i].fd);
+		proxysql_socket_close(fds[i].fd);
 		c_split_2(socket_names[i], ":" , &add, &port);
 		if (atoi(port)==0) {
 			if (socket_names[i]) {
@@ -6477,12 +6482,9 @@ bool ProxySQL_Admin::init(const bootstrap_info_t& bootstrap_info) {
 	main_poll_fds=NULL;
 	main_callback_func=NULL;
 
-	{
-		int rc=pipe(pipefd);
-		if (rc) {
-			perror("Call to pipe() failed");
-			exit(EXIT_FAILURE);
-		}
+	if (!admin_wakeup.open()) {
+		proxy_error("Could not open the admin wakeup channel\n");
+		exit(EXIT_FAILURE);
 	}
 
 	main_callback_func=(int *)malloc(sizeof(int)*MAX_ADMIN_LISTENERS);
@@ -7040,8 +7042,8 @@ void ProxySQL_Admin::admin_shutdown() {
 	(*proxy_sqlite3_shutdown)();
 	if (main_poll_fds) {
 		for (i=0;i<main_poll_nfds;i++) {
-			shutdown(main_poll_fds[i].fd,SHUT_RDWR);
-			close(main_poll_fds[i].fd);
+			shutdown(main_poll_fds[i].fd, PROXYSQL_SHUT_RDWR);
+			proxysql_socket_close(main_poll_fds[i].fd);
 		}
 		free(main_poll_fds);
 	}
@@ -7054,10 +7056,6 @@ void ProxySQL_Admin::admin_shutdown() {
 	delete tables_defs_stats;
 	drop_tables_defs(tables_defs_config);
 	delete tables_defs_config;
-	shutdown(pipefd[0],SHUT_RDWR);
-	shutdown(pipefd[1],SHUT_RDWR);
-	close(pipefd[0]);
-	close(pipefd[1]);
 
 	// delete the scheduler
 	delete scheduler;
@@ -11267,7 +11265,7 @@ void ProxySQL_Admin::flush_debug_filters_runtime_to_database(SQLite3DB *db) {
 		assert(b);
 		free(b);
 		b = NULL;
-		c_split_2(index(key,':')+1, (const char *)":", &b, &c);
+		c_split_2(strchr(key,':')+1, (const char *)":", &b, &c);
 		assert(b);
 		assert(c);
 		std::string query = "INSERT INTO debug_filters VALUES ('";
@@ -13350,6 +13348,7 @@ extern "C" void destroy_Admin(ProxySQL_Admin * pa) {
 }
 
 void ProxySQL_Admin::flush_error_log() {
+#ifndef _WIN32
 	if (GloVars.global.foreground==false) {
 	int outfd=0;
 	int errfd=0;
@@ -13368,14 +13367,19 @@ void ProxySQL_Admin::flush_error_log() {
 		proxy_error("Impossible to open file\n");
 	}
 	}
+#endif
 	{
+		proxy_info("ProxySQL version %s\n", PROXYSQL_VERSION);
+#ifdef _WIN32
+		proxy_info("Detected OS: Windows\n");
+#else
 		struct utsname unameData;
 		int rc;
-		proxy_info("ProxySQL version %s\n", PROXYSQL_VERSION);
 		rc=uname(&unameData);
 		if (rc==0) {
 			proxy_info("Detected OS: %s %s %s %s %s\n", unameData.sysname, unameData.nodename, unameData.release, unameData.version, unameData.machine);
 		}
+#endif
 		if (binary_sha1) {
 			proxy_info("ProxySQL SHA1 checksum: %s\n", binary_sha1);
 		}
@@ -14091,6 +14095,7 @@ void ProxySQL_External_Scheduler::update_table(SQLite3_result *resultset) {
 }
 
 // this fuction will be called as a deatached thread
+#ifndef _WIN32
 static void * waitpid_thread(void *arg) {
 	pid_t *cpid_ptr=(pid_t *)arg;
 	int status;
@@ -14098,6 +14103,7 @@ static void * waitpid_thread(void *arg) {
 	free(cpid_ptr);
 	return NULL;
 }
+#endif
 
 unsigned long long ProxySQL_External_Scheduler::run_once() {
 	Scheduler_Row *sr=NULL;
@@ -14136,6 +14142,9 @@ unsigned long long ProxySQL_External_Scheduler::run_once() {
 			if (curtime >= sr->next) {
 				// the event is scheduled for execution
 				sr->next=curtime+sr->interval_ms;
+#ifdef _WIN32
+				proxy_warning("Scheduler job %u skipped: external scheduler jobs are unavailable in the Windows build\n", sr->id);
+#else
 				char **newargs=(char **)malloc(7*sizeof(char *));
 				for (int i=1;i<7;i++) {
 					newargs[i]=sr->args[i-1];
@@ -14172,6 +14181,7 @@ unsigned long long ProxySQL_External_Scheduler::run_once() {
 					}
 				}
 				free(newargs);
+#endif
 			}
 			if (next_run==0) {
 				next_run=sr->next;

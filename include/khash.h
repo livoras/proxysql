@@ -117,7 +117,11 @@ int main() {
 #ifndef __AC_KHASH_H
 #define __AC_KHASH_H
 
+#ifdef _WIN32
+#include "city.h"
+#else
 #include "../deps/cityhash/cityhash/src/city.h"
+#endif
 /*!
   @header
 

@@ -1,7 +1,9 @@
 #include "proxysql.h"
 #include "cpp.h"
 //#include "SpookyV2.h"
+#ifndef _WIN32
 #include <sys/mman.h>
+#endif
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -980,6 +982,10 @@ void SQLite3DB::LoadPlugin(const char *plugin_name) {
 	proxy_sqlite3_open_v2 = NULL;
 	proxy_sqlite3_exec = NULL;
 	if (plugin_name) {
+#ifdef _WIN32
+		proxy_error("SQLite3 plugins are unavailable in the Windows build\n");
+		exit(EXIT_FAILURE);
+#else
 		int fd = -1;
 		fd = ::open(plugin_name, O_RDONLY);
 		char binary_sha1_sqlite3[SHA_DIGEST_LENGTH*2+1];
@@ -1030,6 +1036,7 @@ void SQLite3DB::LoadPlugin(const char *plugin_name) {
 			exit(EXIT_FAILURE);
 		}
 		proxy_info("Loaded SQLite3 from plugin\n");
+#endif
 	} else {
 		proxy_sqlite3_config = sqlite3_config;
 		proxy_sqlite3_bind_double = sqlite3_bind_double;

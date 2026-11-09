@@ -126,9 +126,9 @@ static int wait_for_mysql(MYSQL *mysql, int status) {
 	pfd.events =
 		(status & MYSQL_WAIT_READ ? POLLIN : 0) |
 		(status & MYSQL_WAIT_WRITE ? POLLOUT : 0) |
-		(status & MYSQL_WAIT_EXCEPT ? POLLPRI : 0);
+		(status & MYSQL_WAIT_EXCEPT ? PROXYSQL_POLL_PRIORITY : 0);
 	timeout = 10;
-	res = poll(&pfd, 1, timeout);
+	res = proxysql_poll(&pfd, 1, timeout);
 	if (res == 0)
 		return MYSQL_WAIT_TIMEOUT | status;
 	else if (res < 0)
@@ -137,7 +137,7 @@ static int wait_for_mysql(MYSQL *mysql, int status) {
 		int status = 0;
 		if (pfd.revents & POLLIN) status |= MYSQL_WAIT_READ;
 		if (pfd.revents & POLLOUT) status |= MYSQL_WAIT_WRITE;
-		if (pfd.revents & POLLPRI) status |= MYSQL_WAIT_EXCEPT;
+		if (pfd.revents & PROXYSQL_POLL_PRIORITY) status |= MYSQL_WAIT_EXCEPT;
 		return status;
 	}
 }
@@ -150,16 +150,12 @@ static void close_mysql(MYSQL *my) {
 		myhdr.pkt_length=1;
 		memcpy(buff, &myhdr, sizeof(mysql_hdr));
 		buff[4]=0x01;
-		int fd=my->net.fd;
+		ProxySQL_Socket fd=my->net.fd;
 #ifdef __APPLE__
 		int arg_on=1;
 		setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (char *) &arg_on, sizeof(int));
-		int wb=send(fd, buff, 5, 0);
-#else
-		int wb=send(fd, buff, 5, MSG_NOSIGNAL);
 #endif
-		fd+=wb; // dummy, to make compiler happy
-		fd-=wb; // dummy, to make compiler happy
+		proxysql_socket_send(fd, buff, sizeof(buff));
 	}
 	mysql_close_no_command(my);
 }
@@ -1594,6 +1590,9 @@ bool MySQL_Monitor_State_Data::create_new_connection() {
 		} else {
 			// mariadb client library disables NONBLOCK for SSL connections ... re-enable it!
 			mysql_options(mysql, MYSQL_OPT_NONBLOCK, 0);
+#ifdef _WIN32
+			proxysql_socket_nonblocking(mysql->net.fd);
+#else
 			int f=fcntl(mysql->net.fd, F_GETFL);
 #ifdef FD_CLOEXEC
 			// asynchronously set also FD_CLOEXEC , this to prevent then when a fork happens the FD are duplicated to new process
@@ -1601,6 +1600,7 @@ bool MySQL_Monitor_State_Data::create_new_connection() {
 #else
 			fcntl(mysql->net.fd, F_SETFL, f|O_NONBLOCK);
 #endif /* FD_CLOEXEC */
+#endif
 			MySQL_Monitor::update_dns_cache_from_mysql_conn(mysql);
 	}
 	return true;
@@ -5771,7 +5771,7 @@ void MySQL_Monitor::populate_monitor_mysql_server_aws_aurora_check_status() {
 		}
 		char lut[30];
 		struct tm __tm_info;
-		localtime_r(&node->last_checked_at, &__tm_info);
+		proxysql_localtime(&node->last_checked_at, &__tm_info);
 		strftime(lut, 25, "%Y-%m-%d %H:%M:%S", &__tm_info);
 
 /*
@@ -6622,7 +6622,7 @@ void MySQL_Monitor::evaluate_aws_aurora_results(unsigned int wHG, unsigned int r
 					char lut[30];
 					struct tm __tm_info;
 					time(&__timer);
-					localtime_r(&__timer, &__tm_info);
+					proxysql_localtime(&__timer, &__tm_info);
 					strftime(lut, 25, "%Y-%m-%d %H:%M:%S", &__tm_info);
 					char *q1 = (char *)"INSERT INTO mysql_server_aws_aurora_failovers VALUES (%d, '%s', '%s')";
 					char *q2 = (char *)malloc(strlen(q1)+strlen(lut)+strlen(hse->server_id));
@@ -6884,7 +6884,7 @@ short MySQL_Monitor_State_Data::next_event(MDB_ASYNC_ST new_st, int status) {
 	if (status & MYSQL_WAIT_WRITE)
 		wait_events |= POLLOUT;
 	if (status & MYSQL_WAIT_EXCEPT)
-		wait_events |= POLLPRI;
+		wait_events |= PROXYSQL_POLL_PRIORITY;
 
 #ifdef DEBUG
 	int fd;
@@ -6908,7 +6908,7 @@ mysql_status(short event) {
 		status |= MYSQL_WAIT_READ;
 	if (event & POLLOUT) 
 		status |= MYSQL_WAIT_WRITE;
-	if (event & POLLPRI) 
+	if (event & PROXYSQL_POLL_PRIORITY)
 		status |= MYSQL_WAIT_EXCEPT;
 	return status;
 }
@@ -7027,7 +7027,7 @@ public:
 				return false;
 			}
 
-			rc = poll(fds_, len_, poll_timeout_ms);
+			rc = proxysql_poll(fds_, len_, poll_timeout_ms);
 			
 			if (rc == -1) {
 				if (errno == EINTR) {
@@ -7257,7 +7257,7 @@ void MySQL_Monitor::monitor_ping_async(SQLite3_result* resultset) {
 		mmsd->mysql = My_Conn_Pool->get_connection(mmsd->hostname, mmsd->port, mmsd.get());
 
 		if (mmsd->mysql) {
-			monitor_poll.add((POLLIN|POLLOUT|POLLPRI), mmsd.get());
+			monitor_poll.add((POLLIN|POLLOUT|PROXYSQL_POLL_PRIORITY), mmsd.get());
 			mmsds.push_back(std::move(mmsd));
 		} else {
 			WorkItem<MySQL_Monitor_State_Data>* item
@@ -7589,7 +7589,7 @@ void MySQL_Monitor::monitor_read_only_async(SQLite3_result* resultset, bool do_d
 			mmsd->mysql = My_Conn_Pool->get_connection(mmsd->hostname, mmsd->port, mmsd.get());
 
 			if (mmsd->mysql) {
-				monitor_poll.add((POLLIN|POLLOUT|POLLPRI), mmsd.get());
+				monitor_poll.add((POLLIN|POLLOUT|PROXYSQL_POLL_PRIORITY), mmsd.get());
 				mmsds.push_back(std::move(mmsd));
 			} else {
 				WorkItem<MySQL_Monitor_State_Data>* item = 
@@ -7795,7 +7795,7 @@ void MySQL_Monitor::monitor_group_replication_async() {
 			mmsd->mysql = My_Conn_Pool->get_connection(mmsd->hostname, mmsd->port, mmsd.get());
 
 			if (mmsd->mysql) {
-				monitor_poll.add((POLLIN|POLLOUT|POLLPRI), mmsd.get());
+				monitor_poll.add((POLLIN|POLLOUT|PROXYSQL_POLL_PRIORITY), mmsd.get());
 				mmsds.push_back(std::move(mmsd));
 			} else {
 				WorkItem<MySQL_Monitor_State_Data>* item =
@@ -7836,7 +7836,7 @@ void MySQL_Monitor::monitor_gr_async_actions_handler(
 	Monitor_Poll monitor_poll(mmsds.size());
 
 	for (const unique_ptr<MySQL_Monitor_State_Data>& mmsd : mmsds) {
-		monitor_poll.add((POLLIN|POLLOUT|POLLPRI), mmsd.get());
+		monitor_poll.add((POLLIN|POLLOUT|PROXYSQL_POLL_PRIORITY), mmsd.get());
 	}
 
 	Monitor_Poll::Process_Ready_Task_Callback_Args args(
@@ -7989,7 +7989,7 @@ void MySQL_Monitor::monitor_replication_lag_async(SQLite3_result* resultset) {
 			mmsd->mysql = My_Conn_Pool->get_connection(mmsd->hostname, mmsd->port, mmsd.get());
 
 			if (mmsd->mysql) {
-				monitor_poll.add((POLLIN|POLLOUT|POLLPRI), mmsd.get());
+				monitor_poll.add((POLLIN|POLLOUT|PROXYSQL_POLL_PRIORITY), mmsd.get());
 				mmsds.push_back(std::move(mmsd));
 			} else {
 				WorkItem<MySQL_Monitor_State_Data>* item =
@@ -8297,7 +8297,7 @@ void MySQL_Monitor::monitor_galera_async() {
 			mmsd->mondb = monitordb;
 
 			if (mmsd->mysql) {
-				monitor_poll.add((POLLIN|POLLOUT|POLLPRI), mmsd.get());
+				monitor_poll.add((POLLIN|POLLOUT|PROXYSQL_POLL_PRIORITY), mmsd.get());
 				mmsds.push_back(std::move(mmsd));
 			} else {
 				WorkItem<MySQL_Monitor_State_Data>* item =

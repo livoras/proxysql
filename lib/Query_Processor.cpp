@@ -1005,7 +1005,7 @@ unsigned long long Query_Processor::get_query_digests_total_size() {
 		ret += results3.get();
 */
 	}
-#if !defined(__FreeBSD__) && !defined(__APPLE__)
+#if defined(__GLIBCXX__)
 	ret += ((sizeof(uint64_t) + sizeof(void *) + sizeof(std::_Rb_tree_node_base)) * digest_umap.size() );
 	ret += ((sizeof(uint64_t) + sizeof(void *) + sizeof(std::_Rb_tree_node_base)) * digest_text_umap.size() );
 #else
@@ -1710,7 +1710,7 @@ __internal_loop:
 		qr->hits++; // this is done without atomic function because it updates only the local variables
 		bool set_flagOUT=false;
 		if (qr->flagOUT_weights_total > 0) {
-			int rnd = random() % qr->flagOUT_weights_total;
+			int rnd = fastrand() % qr->flagOUT_weights_total;
 			for (unsigned int i=0; i< qr->flagOUT_weights->size(); i++) {
 				int w = qr->flagOUT_weights->at(i);
 				if (rnd < w) {
@@ -2690,7 +2690,7 @@ bool Query_Processor::is_valid_gtid(char *gtid, size_t gtid_len) {
 	if (gtid_len < 3) {
 		return false;
 	}
-	char *sep_pos = index(gtid, ':');
+	char *sep_pos = strchr(gtid, ':');
 	if (sep_pos == NULL) {
 		return false;
 	}

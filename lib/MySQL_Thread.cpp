@@ -202,8 +202,6 @@ MySQL_Listeners_Manager::MySQL_Listeners_Manager() {
 MySQL_Listeners_Manager::~MySQL_Listeners_Manager() {
 	while (ifaces->len) {
 		iface_info *ifi=(iface_info *)ifaces->remove_index_fast(0);
-		shutdown(ifi->fd,SHUT_RDWR);
-		close(ifi->fd);
 		if (ifi->port==0) {
 			unlink(ifi->address);
 		}
@@ -213,16 +211,16 @@ MySQL_Listeners_Manager::~MySQL_Listeners_Manager() {
 	ifaces=NULL;
 }
 
-int MySQL_Listeners_Manager::add(const char *iface, unsigned int num_threads, int **perthrsocks) {
+ProxySQL_Socket MySQL_Listeners_Manager::add(const char *iface, unsigned int num_threads, ProxySQL_Socket **perthrsocks) {
 	for (unsigned int i=0; i<ifaces->len; i++) {
 		iface_info *ifi=(iface_info *)ifaces->index(i);
 		if (strcmp(ifi->iface,iface)==0) {
-			return -1;
+			return PROXYSQL_INVALID_SOCKET;
 		}
 	}
 
 	char *address=NULL; char *port=NULL;
-	int s = -1;
+	ProxySQL_Socket s = PROXYSQL_INVALID_SOCKET;
 	char *h = NULL;
 	bool is_ipv6 = false;
 
@@ -231,7 +229,7 @@ int MySQL_Listeners_Manager::add(const char *iface, unsigned int num_threads, in
 		char *p = strchr((char *)iface, ']');
 		if (p == NULL) {
 			proxy_error("Invalid IPv6 address: %s\n", iface);
-			return -1;
+			return PROXYSQL_INVALID_SOCKET;
 		}
 		h = (char *)++iface; // remove first '['
 		*p = '\0';
@@ -250,34 +248,45 @@ int MySQL_Listeners_Manager::add(const char *iface, unsigned int num_threads, in
 			s = listen_on_unix(address, PROXYSQL_LISTEN_LEN);
 		} else {
 			// for TCP we will use SO_REUSEPORT
-			int *l_perthrsocks=(int *)malloc(sizeof(int)*num_threads);
+			auto *l_perthrsocks = static_cast<ProxySQL_Socket *>(malloc(sizeof(ProxySQL_Socket) * num_threads));
 			unsigned int i;
 			for (i=0;i<num_threads;i++) {
 				s=listen_on_port(address, atoi(port), PROXYSQL_LISTEN_LEN, true);
-				ioctl_FIONBIO(s,1);
-				iface_info *ifi=new iface_info((char *)iface, address, atoi(port), s);
-				ifaces->add(ifi);
+				if (s == PROXYSQL_INVALID_SOCKET) {
+					break;
+				}
+				if (proxysql_socket_nonblocking(s) != 0) {
+					proxysql_socket_close(s);
+					break;
+				}
 				l_perthrsocks[i]=s;
 			}
-			*perthrsocks=l_perthrsocks;
-			s=0;
+			if (i == num_threads) {
+				for (i=0;i<num_threads;i++) {
+					ifaces->add(new iface_info((char *)iface, address, atoi(port), l_perthrsocks[i]));
+				}
+				*perthrsocks=l_perthrsocks;
+				s=0;
+			} else {
+				while (i > 0) {
+					proxysql_socket_close(l_perthrsocks[--i]);
+				}
+				free(l_perthrsocks);
+				s=PROXYSQL_INVALID_SOCKET;
+			}
 		}
 	}
 #else
 	s = ( atoi(port) ? listen_on_port(address, atoi(port), PROXYSQL_LISTEN_LEN) : listen_on_unix(address, PROXYSQL_LISTEN_LEN));
 #endif /* SO_REUSEPORT */
-	if (s==-1) {
-		if (is_ipv6 == false) {
-			free(address);
-			free(port);
+	if (s != PROXYSQL_INVALID_SOCKET && *perthrsocks == nullptr) {
+		if (proxysql_socket_nonblocking(s) != 0) {
+			proxy_error("Could not make MySQL listener nonblocking: %d\n", proxysql_socket_error());
+			proxysql_socket_close(s);
+			s = PROXYSQL_INVALID_SOCKET;
+		} else {
+			ifaces->add(new iface_info((char *)iface, address, atoi(port), s));
 		}
-
-		return s;
-	}
-	if (s>0) {
-		ioctl_FIONBIO(s,1);
-		iface_info *ifi=new iface_info((char *)iface, address, atoi(port), s);
-		ifaces->add(ifi);
 	}
 	if (is_ipv6 == false) {
 		free(address);
@@ -297,7 +306,7 @@ int MySQL_Listeners_Manager::find_idx(const char *iface) {
 	return -1;
 }
 
-iface_info * MySQL_Listeners_Manager::find_iface_from_fd(int fd) {
+iface_info * MySQL_Listeners_Manager::find_iface_from_fd(ProxySQL_Socket fd) {
 	for (unsigned int i=0; i<ifaces->len; i++) {
 		iface_info *ifi=(iface_info *)ifaces->index(i);
 		if (ifi->fd==fd) {
@@ -317,7 +326,7 @@ int MySQL_Listeners_Manager::find_idx(const char *address, int port) {
 	return -1;
 }
 
-int MySQL_Listeners_Manager::get_fd(unsigned int idx) {
+ProxySQL_Socket MySQL_Listeners_Manager::get_fd(unsigned int idx) {
 	iface_info *ifi=(iface_info *)ifaces->index(idx);
 	return ifi->fd;
 }
@@ -1158,31 +1167,31 @@ unsigned int MySQL_Threads_Handler::get_global_version() {
 	return __sync_fetch_and_add(&__global_MySQL_Thread_Variables_version,0);
 }
 
-int MySQL_Threads_Handler::listener_add(const char *address, int port) {
+ProxySQL_Socket MySQL_Threads_Handler::listener_add(const char *address, int port) {
 	char *s=(char *)malloc(strlen(address)+32);
 	sprintf(s,"%s:%d",address,port);
-	int ret=listener_add((const char *)s);
+	ProxySQL_Socket ret=listener_add((const char *)s);
 	free(s);
 	return ret;
 }
 
-int MySQL_Threads_Handler::listener_add(const char *iface) {
-	int rc;
-	int *perthrsocks=NULL;;
+ProxySQL_Socket MySQL_Threads_Handler::listener_add(const char *iface) {
+	ProxySQL_Socket rc;
+	ProxySQL_Socket *perthrsocks = nullptr;
 	rc=MLM->add(iface, num_threads, &perthrsocks);
-	if (rc>-1) {
+	if (rc != PROXYSQL_INVALID_SOCKET) {
 		unsigned int i;
 		if (perthrsocks==NULL) {
 			for (i=0;i<num_threads;i++) {
 				MySQL_Thread *thr=(MySQL_Thread *)mysql_threads[i].worker;
-				while(!__sync_bool_compare_and_swap(&thr->mypolls.pending_listener_add,0,rc)) {
+				while(!__sync_bool_compare_and_swap(&thr->mypolls.pending_listener_add,NO_LISTENER_UPDATE,rc)) {
 					usleep(10); // pause a bit
 				}
 			}
 		} else {
 			for (i=0;i<num_threads;i++) {
 				MySQL_Thread *thr=(MySQL_Thread *)mysql_threads[i].worker;
-				while(!__sync_bool_compare_and_swap(&thr->mypolls.pending_listener_add,0,perthrsocks[i])) {
+				while(!__sync_bool_compare_and_swap(&thr->mypolls.pending_listener_add,NO_LISTENER_UPDATE,perthrsocks[i])) {
 					usleep(10); // pause a bit
 				}
 			}
@@ -1196,32 +1205,25 @@ int MySQL_Threads_Handler::listener_del(const char *iface) {
 	int idx;
 	while ((idx=MLM->find_idx(iface)) >= 0) {
 		unsigned int i;
-		int fd=MLM->get_fd(idx);
+		ProxySQL_Socket fd=MLM->get_fd(idx);
 		for (i=0;i<num_threads;i++) {
 			MySQL_Thread *thr=(MySQL_Thread *)mysql_threads[i].worker;
 #ifdef SO_REUSEPORT
 			if (GloVars.global.reuseport)
-				while(!__sync_bool_compare_and_swap(&thr->mypolls.pending_listener_del,0,-1));
+				while(!__sync_bool_compare_and_swap(&thr->mypolls.pending_listener_del,NO_LISTENER_UPDATE,REMOVE_ALL_LISTENERS));
 			else
 #endif
-			while(!__sync_bool_compare_and_swap(&thr->mypolls.pending_listener_del,0,fd));
+			while(!__sync_bool_compare_and_swap(&thr->mypolls.pending_listener_del,NO_LISTENER_UPDATE,fd));
 		}
 		for (i=0;i<num_threads;i++) {
 			MySQL_Thread *thr=(MySQL_Thread *)mysql_threads[i].worker;
-			while(__sync_fetch_and_add(&thr->mypolls.pending_listener_del,0)) {
+			while(__sync_fetch_and_add(&thr->mypolls.pending_listener_del,0) != NO_LISTENER_UPDATE) {
 				// Since 'listeners_stop' is performed in 'maintenance_loops' by the
 				// workers this active-wait is likely to take some time.
 				usleep(std::min(std::max(mysql_thread___poll_timeout/20, 10000), 40000));
 			}
 		}
 		MLM->del(idx);
-#ifdef SO_REUSEPORT
-		if (GloVars.global.reuseport) {
-			continue;
-		}
-#endif
-		shutdown(fd,SHUT_RDWR);
-		close(fd);
 	}
 	return 0;
 }
@@ -2926,7 +2928,7 @@ MySQL_Thread::~MySQL_Thread() {
 
 }
 
-MySQL_Session * MySQL_Thread::create_new_session_and_client_data_stream(int _fd) {
+MySQL_Session * MySQL_Thread::create_new_session_and_client_data_stream(ProxySQL_Socket _fd) {
 	int arg_on=1;
 	MySQL_Session *sess=new MySQL_Session;
 	register_session(sess); // register session
@@ -2943,21 +2945,9 @@ MySQL_Session * MySQL_Thread::create_new_session_and_client_data_stream(int _fd)
 		// received from the network.
 		// The only modules that seems to be affected by this issue are Admin, SQLite3 Server
 		// and Clickhouse Server
-		int prevflags = fcntl(_fd, F_GETFL, 0);
-		if (prevflags == -1) {
-			proxy_error("For FD %d fcntl() returned -1 errno %d\n", _fd, errno);
-			if (shutdown == 0)
-				assert (prevflags != -1);
-		}
-		int nb = fcntl(_fd, F_SETFL, prevflags | O_NONBLOCK);
-		if (nb == -1) {
-			proxy_error("For FD %d fcntl() returned -1 , previous flags %d , errno %d\n", _fd, prevflags, errno);
-			// previously we were asserting here. But it is possible that this->shutdown is still 0 during the
-			// shutdown itself:
-			// - the current thread is processing connections
-			// - the signal handler thread is still setting shutdown = 0
-			//if (shutdown == 0)
-			//	assert (nb != -1);
+		if (proxysql_socket_nonblocking(_fd) != 0) {
+			proxy_error("Could not make client socket %lld nonblocking: %d\n",
+				static_cast<long long>(_fd), proxysql_socket_error());
 		}
 	}
 	setsockopt(sess->client_myds->fd, IPPROTO_TCP, TCP_NODELAY, (char *) &arg_on, sizeof(arg_on));
@@ -3051,25 +3041,20 @@ struct pollfd * MySQL_Thread::get_pollfd(unsigned int i) {
 	return &mypolls.fds[i];
 }
 
-void MySQL_Thread::poll_listener_add(int sock) {
+void MySQL_Thread::poll_listener_add(ProxySQL_Socket sock) {
 	MySQL_Data_Stream *listener_DS = new MySQL_Data_Stream();
 	listener_DS->myds_type=MYDS_LISTENER;
 	listener_DS->fd=sock;
 
-	proxy_debug(PROXY_DEBUG_NET,1,"Created listener %p for socket %d\n", listener_DS, sock);
+	proxy_debug(PROXY_DEBUG_NET,1,"Created listener %p for socket %lld\n", listener_DS, static_cast<long long>(sock));
 	mypolls.add(POLLIN, sock, listener_DS, monotonic_time());
 }
 
-void MySQL_Thread::poll_listener_del(int sock) {
+void MySQL_Thread::poll_listener_del(ProxySQL_Socket sock) {
 	int i=mypolls.find_index(sock);
 	if (i>=0) {
 		MySQL_Data_Stream *myds=mypolls.myds[i];
 		mypolls.remove_index_fast(i);
-#ifdef SO_REUSEPORT
-		if (GloVars.global.reuseport)
-#else
-		myds->fd=-1;	// this to prevent that delete myds will shutdown the fd;
-#endif
 		delete myds;
 	}
 }
@@ -3308,15 +3293,15 @@ void MySQL_Thread::run_Handle_epoll_wait(int rc) {
 
 
 void MySQL_Thread::run_BootstrapListener() {
-	unsigned int n;
+	ProxySQL_Socket n;
 	while ( // spin here if ...
-		(n=__sync_add_and_fetch(&mypolls.pending_listener_add,0)) // there is a new listener to add
+		(n=__sync_add_and_fetch(&mypolls.pending_listener_add,0)) != NO_LISTENER_UPDATE
 		||
 		(GloMTH->bootstrapping_listeners == true) // MySQL_Thread_Handlers has more listeners to configure
 	) {
-		if (n) {
+		if (n != NO_LISTENER_UPDATE) {
 			poll_listener_add(n);
-			assert(__sync_bool_compare_and_swap(&mypolls.pending_listener_add,n,0));
+			assert(__sync_bool_compare_and_swap(&mypolls.pending_listener_add,n,NO_LISTENER_UPDATE));
 		}
 		// The delay for the active-wait is a fraction of 'poll_timeout'. Since other
 		// threads may be waiting on poll for further operations, checks are meaningless
@@ -3343,10 +3328,10 @@ int MySQL_Thread::run_ComputePollTimeout() {
 
 
 void MySQL_Thread::run_StopListener() {
-	unsigned int n;
-	while ((n=__sync_add_and_fetch(&mypolls.pending_listener_del,0))) {	// spin here
-		if (static_cast<int>(n) == -1) {
-			for (unsigned int i = 0; i < mypolls.len; i++) {
+	ProxySQL_Socket n;
+	while ((n=__sync_add_and_fetch(&mypolls.pending_listener_del,0)) != NO_LISTENER_UPDATE) {
+		if (n == REMOVE_ALL_LISTENERS) {
+			for (unsigned int i = mypolls.len; i-- > 0; ) {
 				if (mypolls.myds[i] && mypolls.myds[i]->myds_type == MYDS_LISTENER) {
 					poll_listener_del(mypolls.myds[i]->fd);
 				}
@@ -3354,7 +3339,7 @@ void MySQL_Thread::run_StopListener() {
 		} else {
 			poll_listener_del(n);
 		}
-		assert(__sync_bool_compare_and_swap(&mypolls.pending_listener_del,n,0));
+		assert(__sync_bool_compare_and_swap(&mypolls.pending_listener_del,n,NO_LISTENER_UPDATE));
 	}
 }
 
@@ -3465,7 +3450,7 @@ __run_skip_1:
 #endif // IDLE_THREADS
 
 		if (unlikely(maintenance_loop == true)) {
-			if (unlikely(__sync_add_and_fetch(&mypolls.pending_listener_del,0))) {
+			if (unlikely(__sync_add_and_fetch(&mypolls.pending_listener_del,0) != NO_LISTENER_UPDATE)) {
 				run_StopListener();
 			}
 		}
@@ -3844,12 +3829,12 @@ bool MySQL_Thread::process_data_on_data_stream(MySQL_Data_Stream *myds, unsigned
 										rb = 0; // exit loop
 									} else { // we are in fast_forward mode and encrypted == false
 										struct pollfd _fds;
-										nfds_t _nfds = 1;
+										unsigned int _nfds = 1;
 										_fds.fd = mypolls.fds[n].fd;
 										_fds.events = POLLIN;
 										_fds.revents = 0;
 										int _rc = proxysql_poll(&_fds, _nfds, 0);
-										if ((_rc > 0) && _fds.revents == POLLIN) {
+										if ((_rc > 0) && (_fds.revents & POLLIN)) {
 											// there is more data
 											myds->revents = _fds.revents;
 										} else {
@@ -4571,7 +4556,7 @@ void MySQL_Thread::unregister_session_connection_handler(int idx, bool _new) {
 }
 
 void MySQL_Thread::listener_handle_new_connection(MySQL_Data_Stream *myds, unsigned int n) {
-	int c;
+	ProxySQL_Socket c;
 	union {
 		struct sockaddr_in in;
 		struct sockaddr_in6 in6;
@@ -4590,7 +4575,7 @@ void MySQL_Thread::listener_handle_new_connection(MySQL_Data_Stream *myds, unsig
 #endif /* SO_REUSEPORT */
 	}
 	c=accept(myds->fd, addr, &addrlen);
-	if (c>-1) { // accept() succeeded
+	if (c != PROXYSQL_INVALID_SOCKET) {
 		if (mysql_thread___client_host_cache_size) {
 			MySQL_Client_Host_Cache_Entry client_host_entry =
 				GloMTH->find_client_host_cache(addr);
@@ -4603,7 +4588,7 @@ void MySQL_Thread::listener_handle_new_connection(MySQL_Data_Stream *myds, unsig
 					"Closing connection because client '%s' reached 'mysql-client_host_error_counts': %d\n",
 					client_addr.c_str(), mysql_thread___client_host_error_counts
 				);
-				close(c);
+				proxysql_socket_close(c);
 				free(addr);
 				status_variables.stvar[st_var_client_host_error_killed_connections] += 1;
 				return;
@@ -4649,7 +4634,6 @@ void MySQL_Thread::listener_handle_new_connection(MySQL_Data_Stream *myds, unsig
 			sess->client_myds->proxy_addr.port=ifi->port;
 		}
 		sess->client_myds->myprot.generate_pkt_initial_handshake(true,NULL,NULL, &sess->thread_session_id, true);
-		ioctl_FIONBIO(sess->client_myds->fd, 1);
 		mypolls.add(POLLIN|POLLOUT, sess->client_myds->fd, sess->client_myds, curtime);
 		proxy_debug(PROXY_DEBUG_NET,1,"Session=%p -- Adding client FD %d\n", sess, sess->client_myds->fd);
 
@@ -5721,7 +5705,7 @@ void MySQL_Thread::Get_Memory_Stats() {
 		} else {
 			status_variables.stvar[st_var_mysql_frontend_buffers_bytes]+=(mysql_sessions->len * QUEUE_T_DEFAULT_SIZE * 2);
 			status_variables.stvar[st_var_mysql_session_internal_bytes]+=(mysql_sessions->len * sizeof(MySQL_Connection));
-#if !defined(__FreeBSD__) && !defined(__APPLE__)
+#if defined(__GLIBCXX__)
 			status_variables.stvar[st_var_mysql_session_internal_bytes]+=((sizeof(int) + sizeof(int) + sizeof(std::_Rb_tree_node_base)) * mysql_sessions->len );
 #else
 			status_variables.stvar[st_var_mysql_session_internal_bytes]+=((sizeof(int) + sizeof(int) + 32) * mysql_sessions->len );

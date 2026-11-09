@@ -421,7 +421,7 @@ MySQL_Connection::MySQL_Connection() {
 	reusable=false;
 	parent=NULL;
 	userinfo=new MySQL_Connection_userinfo();
-	fd=-1;
+	fd=PROXYSQL_INVALID_SOCKET;
 	status_flags=0;
 	last_time_used=0;
 
@@ -1269,6 +1269,9 @@ handler_again:
 				// In case of SSL connections, it's still required to set the socket back to NONBLOCK prior to
 				// non-blockig calls.
 				mysql_options(mysql, MYSQL_OPT_NONBLOCK, 0);
+#ifdef _WIN32
+				proxysql_socket_nonblocking(mysql->net.fd);
+#else
 				int f=fcntl(mysql->net.fd, F_GETFL);
 #ifdef FD_CLOEXEC
 				// asynchronously set also FD_CLOEXEC , this to prevent then when a fork happens the FD are duplicated to new process
@@ -1276,6 +1279,7 @@ handler_again:
 #else
 				fcntl(mysql->net.fd, F_SETFL, f|O_NONBLOCK);
 #endif /* FD_CLOEXEC */
+#endif
 			}
 			//if (parent->use_ssl) {
 				// mariadb client library disables NONBLOCK for SSL connections ... re-enable it!
@@ -2003,7 +2007,7 @@ void MySQL_Connection::process_rows_in_ASYNC_STMT_EXECUTE_STORE_RESULT_CONT(unsi
 
 void MySQL_Connection::next_event(MDB_ASYNC_ST new_st) {
 #ifdef DEBUG
-	int fd;
+	ProxySQL_Socket fd;
 #endif /* DEBUG */
 	wait_events=0;
 
@@ -2019,7 +2023,7 @@ void MySQL_Connection::next_event(MDB_ASYNC_ST new_st) {
 #endif /* DEBUG */
 	else
 #ifdef DEBUG
-		fd= -1;
+		fd = PROXYSQL_INVALID_SOCKET;
 #endif /* DEBUG */
 	if (async_exit_status & MYSQL_WAIT_TIMEOUT) {
 	timeout=10000;
@@ -2767,7 +2771,7 @@ void MySQL_Connection::ProcessQueryAndSetStatusFlags_UserVariables(char *query_d
 			switch (sqloh) {
 				case 0: // old algorithm
 					if (mul!=2) {
-						if (index(query_digest_text,'@')) { // mul = 2 has a special meaning : do not disable multiplex for variables in THIS QUERY ONLY
+						if (strchr(query_digest_text,'@')) { // mul = 2 has a special meaning : do not disable multiplex for variables in THIS QUERY ONLY
 							if (!IsKeepMultiplexEnabledVariables(query_digest_text)) {
 								set_status(true, STATUS_MYSQL_CONNECTION_USER_VARIABLE);
 							}
@@ -2793,7 +2797,7 @@ void MySQL_Connection::ProcessQueryAndSetStatusFlags_UserVariables(char *query_d
 					break;
 			}
 		} else {
-			if (mul!=2 && index(query_digest_text,'@')) { // mul = 2 has a special meaning : do not disable multiplex for variables in THIS QUERY ONLY
+			if (mul!=2 && strchr(query_digest_text,'@')) { // mul = 2 has a special meaning : do not disable multiplex for variables in THIS QUERY ONLY
 				if (!IsKeepMultiplexEnabledVariables(query_digest_text)) {
 					set_status(true, STATUS_MYSQL_CONNECTION_USER_VARIABLE);
 				}
@@ -2938,14 +2942,12 @@ void MySQL_Connection::close_mysql() {
 		myhdr.pkt_length=1;
 		memcpy(buff, &myhdr, sizeof(mysql_hdr));
 		buff[4]=0x01;
-		int fd=mysql->net.fd;
+		ProxySQL_Socket fd=mysql->net.fd;
 #ifdef __APPLE__
 		int arg_on=1;
 		setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (char *) &arg_on, sizeof(int));
-		send(fd, buff, 5, 0);
-#else
-		send(fd, buff, 5, MSG_NOSIGNAL);
 #endif
+		proxysql_socket_send(fd, buff, sizeof(buff));
 	}
 //	int rc=0;
 	mysql_close_no_command(mysql);

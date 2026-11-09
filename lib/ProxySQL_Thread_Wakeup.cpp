@@ -14,44 +14,20 @@ void close_endpoint(ProxySQL_Socket endpoint) {
 	if (endpoint == PROXYSQL_INVALID_SOCKET) {
 		return;
 	}
-#ifdef _WIN32
-	closesocket(endpoint);
-#else
-	close(endpoint);
-#endif
+	proxysql_socket_close(endpoint);
 }
 
 #ifdef _WIN32
-struct Winsock_Runtime {
-	bool ready;
-
-	Winsock_Runtime() {
-		WSADATA data;
-		ready = WSAStartup(MAKEWORD(2, 2), &data) == 0;
-	}
-
-	~Winsock_Runtime() {
-		if (ready) {
-			WSACleanup();
-		}
-	}
-};
-
 struct Scoped_Socket {
 	ProxySQL_Socket handle;
 	~Scoped_Socket() { close_endpoint(handle); }
 };
 
 ProxySQL_Socket loopback_socket() {
-	return WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+	return proxysql_socket_open(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 }
 
 bool open_wakeup_pair(ProxySQL_Socket &reader, ProxySQL_Socket &writer) {
-	static const Winsock_Runtime winsock;
-	if (!winsock.ready) {
-		return false;
-	}
-
 	Scoped_Socket listener {loopback_socket()};
 	sockaddr_in address {};
 	address.sin_family = AF_INET;
@@ -78,14 +54,13 @@ bool open_wakeup_pair(ProxySQL_Socket &reader, ProxySQL_Socket &writer) {
 	int peer_length = sizeof(peer);
 	Scoped_Socket receiver {accept(listener.handle, reinterpret_cast<sockaddr *>(&peer), &peer_length)};
 	const int no_delay = 1;
-	u_long nonblocking = 1;
 	if (receiver.handle == INVALID_SOCKET || peer.sin_port != sender_address.sin_port ||
 		peer.sin_addr.s_addr != sender_address.sin_addr.s_addr ||
 		!SetHandleInformation(reinterpret_cast<HANDLE>(receiver.handle), HANDLE_FLAG_INHERIT, 0) ||
 		setsockopt(sender.handle, IPPROTO_TCP, TCP_NODELAY,
 			reinterpret_cast<const char *>(&no_delay), sizeof(no_delay)) == SOCKET_ERROR ||
-		ioctlsocket(sender.handle, FIONBIO, &nonblocking) == SOCKET_ERROR ||
-		ioctlsocket(receiver.handle, FIONBIO, &nonblocking) == SOCKET_ERROR) {
+		proxysql_socket_nonblocking(sender.handle) == SOCKET_ERROR ||
+		proxysql_socket_nonblocking(receiver.handle) == SOCKET_ERROR) {
 		return false;
 	}
 

@@ -1521,7 +1521,7 @@ __end_while_pool:
 				if (atoi(port)==0) { unlink(socket_names[i]); }
 			}
 			nfds=0;
-			fds[nfds].fd=GloAdmin->pipefd[0];
+			fds[nfds].fd=GloAdmin->poll_wakeup_handle();
 			fds[nfds].events=POLLIN;
 			fds[nfds].revents=0;
 			nfds++;
@@ -1558,7 +1558,7 @@ __end_while_pool:
 
 	}
 	//if (__sync_add_and_fetch(shutdown,0)==0) __sync_add_and_fetch(shutdown,1);
-	for (i=0; i<nfds; i++) {
+	for (i=1; i<nfds; i++) {
 		char *add=NULL; char *port=NULL;
 		close(fds[i].fd);
 		c_split_2(socket_names[i], ":" , &add, &port);

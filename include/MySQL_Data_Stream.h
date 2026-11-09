@@ -154,7 +154,7 @@ class MySQL_Data_Stream
 
 	socklen_t client_addrlen;
 
-	int fd; // file descriptor
+	ProxySQL_Socket fd;
 	int poll_fds_idx;
 
 
@@ -186,7 +186,7 @@ class MySQL_Data_Stream
 
 	int array2buffer_full();
 	void init();	// initialize the data stream
-	void init(enum MySQL_DS_type, MySQL_Session *, int); // initialize with arguments
+	void init(enum MySQL_DS_type, MySQL_Session *, ProxySQL_Socket);
 	void shut_soft();
 	void shut_hard();
 	int read_from_net();
@@ -210,7 +210,7 @@ class MySQL_Data_Stream
 	void unplug_backend();
 
 	void check_data_flow();
-	int assign_fd_from_mysql_conn();
+	ProxySQL_Socket assign_fd_from_mysql_conn();
 
 	unsigned char * resultset2buffer(bool);
 	void buffer2resultset(unsigned char *, unsigned int);

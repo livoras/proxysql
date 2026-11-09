@@ -51,10 +51,10 @@ double proxy_my_rnd(struct rand_struct *rand_st) {
 	return (((double) rand_st->seed1) / rand_st->max_value_dbl);
 }
 
-void proxy_create_random_string(char *_to, uint length, struct rand_struct *rand_st) {
+void proxy_create_random_string(char *_to, unsigned int length, struct rand_struct *rand_st) {
 	unsigned char * to = (unsigned char *)_to;
 	int rc = 0;
-	uint i;
+	unsigned int i;
 	rc = RAND_bytes((unsigned char *)to,length);
 #ifdef DEBUG
 	if (rc==1) {
@@ -135,7 +135,7 @@ void proxy_compute_two_stage_sha1_hash(const char *password, size_t pass_len, ui
   proxy_compute_sha1_hash(hash_stage2, (const char *) hash_stage1, SHA_DIGEST_LENGTH);
 }
 
-void proxy_my_crypt(char *to, const uint8_t *s1, const uint8_t *s2, uint len) {
+void proxy_my_crypt(char *to, const uint8_t *s1, const uint8_t *s2, unsigned int len) {
   const uint8_t *s1_end= s1 + len;
   while (s1 < s1_end)
     *to++= *s1++ ^ *s2++;

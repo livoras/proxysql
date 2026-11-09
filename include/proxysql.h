@@ -13,7 +13,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/time.h>
-#include <sys/resource.h>
 #include <time.h>
 #include <string.h>
 #ifdef NDEBUG
@@ -21,19 +20,31 @@
 #endif
 #include <assert.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#ifdef _WIN32
+#include "proxysql_socket.h"
+#include "proxysql_windows_strings.h"
+#include <ws2tcpip.h>
+#include <afunix.h>
+#else
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <pthread.h>
 #include <sys/wait.h>
 
 #include <netinet/in.h>
 #include <sys/un.h>
 #include <netinet/tcp.h>
-#include <sys/types.h>
 #include <sys/ioctl.h>
 #include <netdb.h>
 #include <sys/syscall.h>
-#include <sys/stat.h>
+#include <poll.h>
+#include <execinfo.h>
+#include <dlfcn.h>
+#endif
 
 #include <signal.h>
 #include <errno.h>
@@ -43,13 +54,6 @@
 #include "openssl/md5.h"
 #include "openssl/ssl.h"
 #include "openssl/err.h"
-#include <poll.h>
-#include <execinfo.h>
-
-#include <dlfcn.h>
-
-#include <sys/ioctl.h>
-
 #include "mysql.h"
 #include "mariadb_com.h"
 
@@ -60,9 +64,9 @@
 #include "proxysql_macros.h"
 #include "proxysql_coredump.h"
 #include "proxysql_sslkeylog.h"
-#include "jemalloc.h"
-
+#include "proxysql_network.h"
 #ifndef NOJEM
+#include "jemalloc.h"
 #if defined(__APPLE__) && defined(__MACH__)
 #ifndef mallctl
 #define mallctl(a, b, c, d, e) je_mallctl(a, b, c, d, e)
@@ -98,8 +102,6 @@
 extern "C" {
 #endif /* __cplusplus */
 
-int listen_on_port(char *ip, uint16_t port, int backlog, bool reuseport=false);
-int listen_on_unix(char *, int);
 int connect_socket(char *, int);
 int config_file_is_readable(char *);
 unsigned int CPY3(unsigned char *);
@@ -109,8 +111,6 @@ int pkt_end(unsigned char *, unsigned int);
 int pkt_com_query(unsigned char *, unsigned int);
 enum MySQL_response_type mysql_response(unsigned char *, unsigned int);
 
-__attribute__((__format__ (__printf__, 2, 3)))
-void proxy_error_func(int errcode, const char *, ...);
 void print_backtrace(void);
 void proxy_info_(const char* msg, ...);
 

@@ -1,6 +1,7 @@
 /* SHA256-based Unix crypt implementation.
    Released into the Public Domain by Ulrich Drepper <drepper@redhat.com>.  */
 
+#include <algorithm>
 #include <endian.h>
 #include <errno.h>
 #include <limits.h>
@@ -12,6 +13,12 @@
 #include <sys/param.h>
 #include <sys/types.h>
 
+#ifdef _WIN32
+static char *stpncpy(char *destination, const char *source, size_t length) {
+  strncpy(destination, source, length);
+  return destination + strnlen(source, length);
+}
+#endif
 
 /* Structure to save state of computation between the single steps.  */
 struct sha256_ctx
@@ -340,12 +347,12 @@ extern "C" char * sha256_crypt_r (const char *key, const char *salt, char *buffe
       if (*endp == '$')
 	{
 	  salt = endp + 1;
-	  rounds = MAX (ROUNDS_MIN, MIN (srounds, ROUNDS_MAX));
+	  rounds = std::clamp<unsigned long>(srounds, ROUNDS_MIN, ROUNDS_MAX);
 	  rounds_custom = true;
 	}
     }
 
-  salt_len = MIN (strcspn (salt, "$"), SALT_LEN_MAX);
+  salt_len = std::min<size_t>(strcspn(salt, "$"), SALT_LEN_MAX);
   key_len = strlen (key);
 
   if ((key - (char *) 0) % __alignof__ (uint32_t) != 0)
@@ -476,19 +483,19 @@ extern "C" char * sha256_crypt_r (const char *key, const char *salt, char *buffe
 
   /* Now we can construct the result string.  It consists of three
      parts.  */
-  cp = stpncpy (buffer, sha256_salt_prefix, MAX (0, buflen));
+  cp = stpncpy (buffer, sha256_salt_prefix, std::max(0, buflen));
   buflen -= sizeof (sha256_salt_prefix) - 1;
 
   if (rounds_custom)
     {
-      int n = snprintf (cp, MAX (0, buflen), "%s%zu$",
+      int n = snprintf (cp, std::max(0, buflen), "%s%zu$",
 			sha256_rounds_prefix, rounds);
       cp += n;
       buflen -= n;
     }
 
-  cp = stpncpy (cp, salt, MIN ((size_t) MAX (0, buflen), salt_len));
-  buflen -= MIN ((size_t) MAX (0, buflen), salt_len);
+  cp = stpncpy (cp, salt, std::min(static_cast<size_t>(std::max(0, buflen)), salt_len));
+  buflen -= std::min(static_cast<size_t>(std::max(0, buflen)), salt_len);
 
   if (buflen > 0)
     {

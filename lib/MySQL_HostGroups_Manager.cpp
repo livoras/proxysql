@@ -65,9 +65,9 @@ static int wait_for_mysql(MYSQL *mysql, int status) {
 	pfd.events =
 		(status & MYSQL_WAIT_READ ? POLLIN : 0) |
 		(status & MYSQL_WAIT_WRITE ? POLLOUT : 0) |
-		(status & MYSQL_WAIT_EXCEPT ? POLLPRI : 0);
+		(status & MYSQL_WAIT_EXCEPT ? PROXYSQL_POLL_PRIORITY : 0);
 	timeout = 1;
-	res = poll(&pfd, 1, timeout);
+	res = proxysql_poll(&pfd, 1, timeout);
 	if (res == 0)
 		return MYSQL_WAIT_TIMEOUT | status;
 	else if (res < 0)
@@ -76,7 +76,7 @@ static int wait_for_mysql(MYSQL *mysql, int status) {
 		int status = 0;
 		if (pfd.revents & POLLIN) status |= MYSQL_WAIT_READ;
 		if (pfd.revents & POLLOUT) status |= MYSQL_WAIT_WRITE;
-		if (pfd.revents & POLLPRI) status |= MYSQL_WAIT_EXCEPT;
+		if (pfd.revents & PROXYSQL_POLL_PRIORITY) status |= MYSQL_WAIT_EXCEPT;
 		return status;
 	}
 }

@@ -24,9 +24,9 @@
 #define __thread_h__
 
 #include <pthread.h>
-#include "jemalloc.h"
 
 #ifndef NOJEM
+#include "jemalloc.h"
 #if defined(__APPLE__) && defined(__MACH__)
 #ifndef mallctl
 #define mallctl(a, b, c, d, e) je_mallctl(a, b, c, d, e)

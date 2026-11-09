@@ -1,3 +1,5 @@
+#include <pthread.h>
+
 #define PKT_PARSED 0
 #define PKT_ERROR 1
 

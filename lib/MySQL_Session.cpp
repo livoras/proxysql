@@ -1064,7 +1064,7 @@ void MySQL_Session::writeout() {
 				fds.fd=client_myds->fd;
 				fds.events=POLLOUT;
 				fds.revents=0;
-				int retpoll=poll(&fds, 1, 0);
+				int retpoll=proxysql_poll(&fds, 1, 0);
 				if (retpoll>0) {
 					if (fds.revents==POLLOUT) {
 						retbytes=client_myds->write_to_net_poll();
@@ -1751,9 +1751,9 @@ bool MySQL_Session::handler_special_queries(PtrSize_t *pkt) {
 		if (strcasestr(csname," COLLATE ")) {
 			collation_name_unstripped = strcasestr(csname," COLLATE ") + strlen(" COLLATE ");
 			collation_name = trim_spaces_and_quotes_in_place(collation_name_unstripped);
-			char *_s1=index(csname,' ');
-			char *_s2=index(csname,'\'');
-			char *_s3=index(csname,'"');
+			char *_s1=strchr(csname,' ');
+			char *_s2=strchr(csname,'\'');
+			char *_s3=strchr(csname,'"');
 			char *_s = NULL;
 			if (_s1) {
 				_s = _s1;
@@ -1780,9 +1780,9 @@ bool MySQL_Session::handler_special_queries(PtrSize_t *pkt) {
 				*_s = '\0';
 			}
 
-			_s1 = index(collation_name,' ');
-			_s2 = index(collation_name,'\'');
-			_s3 = index(collation_name,'"');
+			_s1 = strchr(collation_name,' ');
+			_s2 = strchr(collation_name,'\'');
+			_s3 = strchr(collation_name,'"');
 			_s = NULL;
 			if (_s1) {
 				_s = _s1;
@@ -6611,7 +6611,7 @@ bool MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 				proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 5, "Parsing SET command = %s\n", nqn.c_str());
 			}
 #endif
-			if (index(dig,';') && (index(dig,';') != dig + strlen(dig)-1)) {
+			if (strchr(dig,';') && (strchr(dig,';') != dig + strlen(dig)-1)) {
 				string nqn;
 				if (mysql_thread___parse_failure_logs_digest)
 					nqn = string(CurrentQuery.get_digest_text());
@@ -7685,7 +7685,7 @@ void MySQL_Session::handler___client_DSS_QUERY_SENT___server_DSS_NOT_INITIALIZED
 
 			char *sep_pos = NULL;
 			if (gtid_uuid != NULL) {
-				sep_pos = index(gtid_uuid,':');
+				sep_pos = strchr(gtid_uuid,':');
 				if (sep_pos == NULL) {
 					gtid_uuid = NULL; // gtid is invalid
 				}
@@ -7797,7 +7797,7 @@ void MySQL_Session::handler___client_DSS_QUERY_SENT___server_DSS_NOT_INITIALIZED
 		}
 		return;
 	}
-	if (mybe->server_myds->myconn->fd==-1) {
+	if (mybe->server_myds->myconn->fd == PROXYSQL_INVALID_SOCKET) {
 		// we didn't get a valid connection, we need to create one
 		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 5, "Sess=%p -- MySQL Connection has no FD\n", this);
 		MySQL_Connection *myconn=mybe->server_myds->myconn;

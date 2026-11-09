@@ -27,20 +27,24 @@
 #include "Web_Interface.hpp"
 #include "proxysql_utils.h"
 
+#ifndef _WIN32
 #include "libdaemon/dfork.h"
 #include "libdaemon/dsignal.h"
 #include "libdaemon/dlog.h"
 #include "libdaemon/dpid.h"
 #include "libdaemon/dexec.h"
+#include <sys/mman.h>
+#else
+#include <filesystem>
+#include <fstream>
+#endif
 #include "ev.h"
 
 #include "curl/curl.h"
 
 #include "openssl/x509v3.h"
 
-#include <sys/mman.h>
-
-#include <uuid/uuid.h>
+#include "proxysql_uuid.h"
 
 #ifdef DEBUG
 #include "proxy_protocol_info.h"
@@ -79,6 +83,7 @@ static pthread_mutex_t *lockarray;
 #include "openssl/crypto.h"
 
 
+#ifndef _WIN32
 // this fuction will be called as a deatached thread
 static void * waitpid_thread(void *arg) {
 	pid_t *cpid_ptr=(pid_t *)arg;
@@ -88,6 +93,7 @@ static void * waitpid_thread(void *arg) {
 	free(cpid_ptr);
 	return NULL;
 }
+#endif
 
 
 
@@ -234,6 +240,7 @@ void * main_check_latest_version_thread(void *arg) {
 // set disable_watchdog=1
 volatile int disable_watchdog = 0;
 
+#ifndef _WIN32
 void parent_open_error_log() {
 	if (GloVars.global.foreground==false) {
 		int outfd=0;
@@ -270,6 +277,7 @@ static const char * proxysql_pid_file() {
 	snprintf(fn, sizeof(fn), "%s", daemon_pid_file_ident);
 	return fn;
 }
+#endif
 
 
 /*struct cpu_timer
@@ -736,7 +744,12 @@ void ProxySQL_Main_init_main_modules() {
 	GloMyStmt=NULL;
 
 	// initialize libev
-	if (!ev_default_loop (EVBACKEND_POLL | EVFLAG_NOENV)) {
+#ifdef _WIN32
+	const unsigned int ev_flags = EVBACKEND_SELECT | EVFLAG_NOENV;
+#else
+	const unsigned int ev_flags = EVBACKEND_POLL | EVFLAG_NOENV;
+#endif
+	if (!ev_default_loop(ev_flags)) {
 		fprintf(stderr,"could not initialise libev");
 		exit(EXIT_FAILURE);
 	}
@@ -1017,6 +1030,12 @@ static void LoadPlugins() {
 	if (proxy_sqlite3_open_v2 == nullptr) {
 		SQLite3DB::LoadPlugin(GloVars.sqlite3_plugin);
 	}
+#ifdef _WIN32
+	if (GloVars.web_interface_plugin || GloVars.ldap_auth_plugin) {
+		proxy_error("Web interface and LDAP plugins are unavailable in the Windows build\n");
+		exit(EXIT_FAILURE);
+	}
+#else
 	if (GloVars.web_interface_plugin) {
 		dlerror();
 		char * dlsym_error = NULL;
@@ -1087,6 +1106,7 @@ static void LoadPlugins() {
 			//}
 		}
 	}
+#endif
 }
 
 /**
@@ -1241,7 +1261,6 @@ void ProxySQL_Main_init_phase4___shutdown() {
 	cpu_timer t;
 	ProxySQL_Main_join_all_threads();
 
-	//write(GloAdmin->pipefd[1], &GloAdmin->pipefd[1], 1);	// write a random byte
 	if (GloVars.global.nostart) {
 		pthread_mutex_unlock(&GloVars.global.start_mutex);
 	}
@@ -1263,6 +1282,7 @@ void ProxySQL_Main_init_phase4___shutdown() {
  * @return void.
  * @note This function does not return if an error occurs; it exits the process.
  */
+#ifndef _WIN32
 void ProxySQL_daemonize_phase1(char *argv0) {
 	int rc; // Variable to store the return code of system calls
 
@@ -1489,6 +1509,7 @@ bool ProxySQL_daemonize_phase3() {
 	}
 	return true;
 }
+#endif
 
 void my_terminate(void) {
 	proxy_error("ProxySQL crashed due to exception\n");
@@ -1851,6 +1872,7 @@ pair<int32_t,acct_creds_t> create_bootstrap_account(MYSQL* mysql, const string& 
  * If glovars.proxy_restart_on_error is true, the process restart logic is executed.
  * The function implements exponential backoff and terminates if the maximum number of restart attempts is reached.
  */
+#ifndef _WIN32
 void handleProcessRestart() {
 	// Maximum number of restart attempts allowed
 	constexpr int MAX_RESTART_ATTEMPTS = 5;
@@ -1927,6 +1949,7 @@ void handleProcessRestart() {
 		}
 	} while (pid > 0);
 }
+#endif
 
 #ifndef NOJEM
 int print_jemalloc_conf() {
@@ -1978,6 +2001,12 @@ int print_jemalloc_conf() {
 #endif
 
 int main(int argc, const char * argv[]) {
+#ifdef _WIN32
+	if (!proxysql_socket_init()) {
+		proxy_error("Could not initialize Winsock: %d\n", proxysql_socket_error());
+		return EXIT_FAILURE;
+	}
+#endif
 #ifdef DEBUG
 	{
 		// This run some ProxyProtocolInfo tests.
@@ -2020,6 +2049,7 @@ int main(int argc, const char * argv[]) {
 		if (rc) { exit(EXIT_FAILURE); }
 	}
 
+#ifndef _WIN32
 	struct rlimit nlimit;
 	{
 		int rc = getrlimit(RLIMIT_NOFILE, &nlimit);
@@ -2046,12 +2076,17 @@ int main(int argc, const char * argv[]) {
 			proxy_error("Call to getrlimit failed: %s\n", strerror(errno));
 		}
 	}
+#endif
 
 	bootstrap_info_t bootstrap_info {};
 	// Try to connect to MySQL for performing the bootstrapping process:
 	//   - If data isn't found we perform the bootstrap process.
 	//   - If non-empty datadir is present, reconfiguration should be performed.
 	if (GloVars.global.gr_bootstrap_mode == 1) {
+#ifdef _WIN32
+		proxy_error("Group Replication bootstrap is unavailable in the Windows build\n");
+		return EXIT_FAILURE;
+#else
 		// Check the other required arguments for performing the bootstrapping process:
 		//  - Username
 		//  - Password - asked by prompt or supplied
@@ -2326,6 +2361,7 @@ int main(int argc, const char * argv[]) {
 		bootstrap_info.mon_pass = new_mon_pass;
 
 		mysql_close(mysql);
+#endif
 	}
 
 	{
@@ -2338,6 +2374,27 @@ int main(int argc, const char * argv[]) {
 
 	{
 		cpu_timer t;
+#ifdef _WIN32
+		wchar_t path[32768];
+		const DWORD length = GetModuleFileNameW(nullptr, path, sizeof(path) / sizeof(path[0]));
+		if (length > 0 && length < sizeof(path) / sizeof(path[0])) {
+			std::ifstream executable(std::filesystem::path(path), std::ios::binary);
+			SHA_CTX checksum;
+			SHA1_Init(&checksum);
+			char block[8192];
+			while (executable.read(block, sizeof(block)) || executable.gcount() > 0) {
+				SHA1_Update(&checksum, block, executable.gcount());
+			}
+			if (executable.eof()) {
+				unsigned char digest[SHA_DIGEST_LENGTH];
+				SHA1_Final(digest, &checksum);
+				binary_sha1 = static_cast<char *>(malloc(SHA_DIGEST_LENGTH * 2 + 1));
+				for (size_t i = 0; i < sizeof(digest); ++i) {
+					sprintf(binary_sha1 + i * 2, "%02x", digest[i]);
+				}
+			}
+		}
+#else
 		int fd = -1;
 		char buff[PATH_MAX+1];
 		ssize_t len = -1;
@@ -2374,10 +2431,12 @@ int main(int argc, const char * argv[]) {
 		} else {
 			proxy_error("Unable to open %s: %s\n", argv[0], strerror(errno));
 		}
+#endif
 #ifdef DEBUG
 		std::cerr << "SHA1 generated in ";
 #endif
 	}
+#ifndef _WIN32
 	if (GloVars.global.foreground==false) {
 		{
 			cpu_timer t;
@@ -2414,7 +2473,9 @@ int main(int argc, const char * argv[]) {
 			handleProcessRestart();
 		}
 
-	} else {
+	} else
+#endif
+	{
 		GloAdmin->flush_error_log();
 		GloVars.install_signal_handler();
 	}
@@ -2568,12 +2629,16 @@ __shutdown:
 		goto __start_label;
 	}
 
+#ifndef _WIN32
 finish:
+#endif
 	//daemon_log(LOG_INFO, "Exiting...");
 	proxy_info("Exiting...\n");
+#ifndef _WIN32
 	daemon_retval_send(255);
 	daemon_signal_done();
 	daemon_pid_file_remove();
+#endif
 
 //	l_mem_destroy(__thr_sfp);
 

@@ -16,6 +16,7 @@
 #include "ProxySQL_RESTAPI_Server.hpp"
 
 #include "proxysql_typedefs.h"
+#include "ProxySQL_Thread_Wakeup.h"
 
 typedef struct { uint32_t hash; uint32_t key; } t_symstruct;
 class ProxySQL_Config;
@@ -195,6 +196,7 @@ class ProxySQL_Admin {
 	std::vector<table_def_t *> *tables_defs_config;
 
 	pthread_t admin_thr;
+	ProxySQL_Thread_Wakeup admin_wakeup;
 
 	int main_poll_nfds;
 	struct pollfd *main_poll_fds;
@@ -422,7 +424,7 @@ class ProxySQL_Admin {
 	SQLite3DB *debugdb_disk; // on disk for debug
 	int debug_output;
 #endif
-	int pipefd[2];
+	ProxySQL_Socket poll_wakeup_handle() const { return admin_wakeup.reader(); }
 	void print_version();
 	/**
 	 * @brief Initializes the module.

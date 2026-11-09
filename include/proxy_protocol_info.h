@@ -1,10 +1,16 @@
 #ifndef PROXY_PROTOCOL_INFO_H
 #define PROXY_PROTOCOL_INFO_H
 
-#include <string.h>
-#include <netinet/in.h>
+#include <cstdint>
 #include <string>
+#include <string.h>
+#ifdef _WIN32
+#include "proxysql_socket.h"
+#include <ws2tcpip.h>
+#else
+#include <netinet/in.h>
 #include <arpa/inet.h>
+#endif
 
 
 class ProxyProtocolInfo {

@@ -8,7 +8,9 @@
 //#include "wqueue.h"
 
 #include <fcntl.h>
+#ifndef _WIN32
 #include <sys/times.h>
+#endif
 
 #ifdef DEBUG
 #define DEB "_DEBUG"
@@ -507,8 +509,23 @@ SQLite3_result * ProxySQL_Statistics::get_system_cpu_metrics(int interval) {
 
 void ProxySQL_Statistics::system_cpu_sets() {
 	int rc;
+	sqlite3_int64 user_ticks;
+	sqlite3_int64 kernel_ticks;
+#ifdef _WIN32
+	FILETIME created, exited, kernel, user;
+	if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) {
+		return;
+	}
+	// FILETIME is measured in 100 ns units. Store centiseconds like Linux.
+	user_ticks = ((static_cast<uint64_t>(user.dwHighDateTime) << 32) | user.dwLowDateTime) / 100000;
+	kernel_ticks = ((static_cast<uint64_t>(kernel.dwHighDateTime) << 32) | kernel.dwLowDateTime) / 100000;
+	{
+#else
 	struct tms buf;
 	if (times(&buf) > -1) {
+		user_ticks = buf.tms_utime;
+		kernel_ticks = buf.tms_stime;
+#endif
 		sqlite3 *mydb3=statsdb_disk->get_db();
 		sqlite3_stmt *statement1=NULL;
 		char *query1=NULL;
@@ -518,8 +535,8 @@ void ProxySQL_Statistics::system_cpu_sets() {
 		time_t ts = time(NULL);
 
 		rc = (*proxy_sqlite3_bind_int64)(statement1, 1, ts); ASSERT_SQLITE_OK(rc, statsdb_disk);
-		rc = (*proxy_sqlite3_bind_int64)(statement1, 2, buf.tms_utime); ASSERT_SQLITE_OK(rc, statsdb_disk);
-		rc = (*proxy_sqlite3_bind_int64)(statement1, 3, buf.tms_stime); ASSERT_SQLITE_OK(rc, statsdb_disk);
+		rc = (*proxy_sqlite3_bind_int64)(statement1, 2, user_ticks); ASSERT_SQLITE_OK(rc, statsdb_disk);
+		rc = (*proxy_sqlite3_bind_int64)(statement1, 3, kernel_ticks); ASSERT_SQLITE_OK(rc, statsdb_disk);
 
 		ASSERT_SQLITE_OK(rc, statsdb_disk);
 		SAFE_SQLITE3_STEP2(statement1);

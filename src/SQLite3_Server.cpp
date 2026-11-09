@@ -20,10 +20,6 @@
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
-#include <sys/socket.h>
-#include <resolv.h>
-#include <arpa/inet.h>
-#include <pthread.h>
 #include <pthread.h>
 #ifndef SPOOKYV2
 #include "SpookyV2.h"
@@ -31,7 +27,6 @@
 #endif
 
 #include <fcntl.h>
-#include <sys/utsname.h>
 
 using std::string;
 
@@ -111,7 +106,6 @@ extern SQLite3_Server *GloSQLite3Server;
 #define PANIC(msg)  { perror(msg); exit(EXIT_FAILURE); }
 
 
-static pthread_mutex_t sock_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static char * SQLite3_Server_variables_names[] = {
 	(char *)"mysql_ifaces",
@@ -1021,7 +1015,7 @@ SQLite3_Session::~SQLite3_Session() {
 
 static void *child_mysql(void *arg) {
 
-	int client = *(int *)arg;
+	ProxySQL_Socket client = *static_cast<ProxySQL_Socket *>(arg);
 
 	set_thread_name("SQLiteChldMySQL");
 	GloMTH->wrlock();
@@ -1033,9 +1027,8 @@ static void *child_mysql(void *arg) {
 	GloMTH->wrunlock();
 
 	struct pollfd fds[1];
-	nfds_t nfds=1;
+	unsigned int nfds=1;
 	int rc;
-	pthread_mutex_unlock(&sock_mutex);
 	MySQL_Thread *mysql_thr=new MySQL_Thread();
 	mysql_thr->curtime=monotonic_time();
 
@@ -1063,7 +1056,7 @@ static void *child_mysql(void *arg) {
 			fds[0].events=POLLIN;
 		}
 		fds[0].revents=0;
-		rc=poll(fds,nfds,__sync_fetch_and_add(&__SQLite3_Server_refresh_interval,0));
+		rc=proxysql_poll(fds,nfds,__sync_fetch_and_add(&__SQLite3_Server_refresh_interval,0));
 		if (rc == -1) {
 			if (errno == EINTR) {
 				continue;
@@ -1131,6 +1124,7 @@ static void * sqlite3server_main_loop(void *arg)
 	int nfds=((struct _main_args *)arg)->nfds;
 	int *callback_func=((struct _main_args *)arg)->callback_func;
 	volatile int *shutdown=((struct _main_args *)arg)->shutdown;
+	fds[nfds++] = { GloAdmin->poll_wakeup_handle(), POLLIN, 0 };
 	char *socket_names[MAX_SQLITE3SERVER_LISTENERS];
 	for (i=0;i<MAX_SQLITE3SERVER_LISTENERS;i++) { socket_names[i]=NULL; }
 	pthread_attr_t attr;
@@ -1139,8 +1133,8 @@ static void * sqlite3server_main_loop(void *arg)
 	set_thread_name("SQLite3_Main");
 	while (glovars.shutdown==0 && *shutdown==0)
 	{
-		int *client;
-		int client_t;
+		ProxySQL_Socket *client;
+		ProxySQL_Socket client_t;
 		socklen_t addr_size = sizeof(addr);
 		pthread_t child;
 		size_t stacks;
@@ -1155,18 +1149,17 @@ static void * sqlite3server_main_loop(void *arg)
 		}
 		poll_wait=poll_wait/1000;	// conversion to millisecond
 		int rc;
-		rc=poll(fds,nfds,poll_wait);
+		rc=proxysql_poll(fds,nfds,poll_wait);
 		if ((rc == -1 && errno == EINTR) || rc==0) {
         // poll() timeout, try again
 			goto __end_while_pool;
 		}
 		for (i=1;i<nfds;i++) {
-			if (fds[i].revents==POLLIN) {
+			if (fds[i].revents & POLLIN) {
 				client_t = accept(fds[i].fd, (struct sockaddr*)&addr, &addr_size);
-				if (client_t > 0) { // minor error handling
+				if (client_t != PROXYSQL_INVALID_SOCKET) { // minor error handling
 					pthread_attr_getstacksize (&attr, &stacks);
-					pthread_mutex_lock (&sock_mutex);
-					client=(int *)malloc(sizeof(int));
+					client = static_cast<ProxySQL_Socket *>(malloc(sizeof(ProxySQL_Socket)));
 					*client= client_t;
 					if ( pthread_create(&child, &attr, child_func[callback_func[i]], client) != 0 )
 						perror("Thread creation");
@@ -1192,14 +1185,14 @@ __end_while_pool:
 			version=S_amll.get_version();
 			for (i=1; i<nfds; i++) {
 				char *add=NULL; char *port=NULL;
-				close(fds[i].fd);
+				proxysql_socket_close(fds[i].fd);
 				if (socket_names[i] != NULL) { // this should skip socket_names[0] , because it is a pipe
 					c_split_2(socket_names[i], ":" , &add, &port);
 					if (atoi(port)==0) { unlink(socket_names[i]); }
 				}
 			}
 			nfds=0;
-			fds[nfds].fd=GloAdmin->pipefd[0];
+			fds[nfds].fd=GloAdmin->poll_wakeup_handle();
 			fds[nfds].events=POLLIN;
 			fds[nfds].revents=0;
 			nfds++;
@@ -1224,11 +1217,11 @@ __end_while_pool:
                                 }
 
 #ifdef SO_REUSEPORT
-				int s = ( atoi(port) ? listen_on_port(add, atoi(port), 128, true) : listen_on_unix(add, 128));
+				ProxySQL_Socket s = ( atoi(port) ? listen_on_port(add, atoi(port), 128, true) : listen_on_unix(add, 128));
 #else
-				int s = ( atoi(port) ? listen_on_port(add, atoi(port), 128) : listen_on_unix(add, 128));
+				ProxySQL_Socket s = ( atoi(port) ? listen_on_port(add, atoi(port), 128) : listen_on_unix(add, 128));
 #endif // SO_REUSEPORT
-				if (s>0) { fds[nfds].fd=s; fds[nfds].events=POLLIN; fds[nfds].revents=0; callback_func[nfds]=0; socket_names[nfds]=strdup(sn); nfds++; }
+				if (s != PROXYSQL_INVALID_SOCKET) { fds[nfds].fd=s; fds[nfds].events=POLLIN; fds[nfds].revents=0; callback_func[nfds]=0; socket_names[nfds]=strdup(sn); nfds++; }
 				if (add) free(add);
 				if (port) free(port);
 			}
@@ -1237,9 +1230,9 @@ __end_while_pool:
 
 	}
 	//if (__sync_add_and_fetch(shutdown,0)==0) __sync_add_and_fetch(shutdown,1);
-	for (i=0; i<nfds; i++) {
+	for (i=1; i<nfds; i++) {
 		char *add=NULL; char *port=NULL;
-		close(fds[i].fd);
+		proxysql_socket_close(fds[i].fd);
 		c_split_2(socket_names[i], ":" , &add, &port);
 		if (atoi(port)==0) {
 			if (socket_names[i]) {
@@ -1471,7 +1464,7 @@ string get_curtime_str() {
 	char lut[30];
 	struct tm __tm_info;
 	time(&__timer);
-	localtime_r(&__timer, &__tm_info);
+	proxysql_localtime(&__timer, &__tm_info);
 	strftime(lut, 25, "%Y-%m-%d %H:%M:%S", &__tm_info);
 	string s = string(lut);
 	return s;

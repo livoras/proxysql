@@ -10,7 +10,6 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <dirent.h>
-#include <sys/resource.h>
 #include <assert.h>
 
 #include "sqlite3db.h"
@@ -154,7 +153,7 @@ struct to_opts_t {
 	/**
 	 * @brief Timeout used for 'poll()' non blocking calls.
 	 */
-	suseconds_t poll_to_us;
+	decltype(timeval::tv_usec) poll_to_us;
 	/**
 	 * @brief The duration of the sleeps between the checks being performed
 	 *   on the child process waiting it to exit after being signaled to terminate,

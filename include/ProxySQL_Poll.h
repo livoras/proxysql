@@ -3,13 +3,16 @@
 
 #include "proxysql_socket.h"
 
+constexpr ProxySQL_Socket NO_LISTENER_UPDATE = PROXYSQL_INVALID_SOCKET;
+constexpr ProxySQL_Socket REMOVE_ALL_LISTENERS = static_cast<ProxySQL_Socket>(-2);
+
 class iface_info {
 	public:
 	char *iface;
 	char *address;
 	int port;
-	int fd;
-	iface_info(char *_i, char *_a, int p, int f) {
+	ProxySQL_Socket fd;
+	iface_info(char *_i, char *_a, int p, ProxySQL_Socket f) {
 		iface=strdup(_i);
 		address=strdup(_a);
 		port=p;
@@ -18,7 +21,8 @@ class iface_info {
 	~iface_info() {
 		free(iface);
 		free(address);
-		close(fd);
+		shutdown(fd, PROXYSQL_SHUT_RDWR);
+		proxysql_socket_close(fd);
 	}
 };
 
@@ -34,8 +38,8 @@ class ProxySQL_Poll {
 	MySQL_Data_Stream **myds;
 	unsigned long long *last_recv;
 	unsigned long long *last_sent;
-	volatile int pending_listener_add;
-	volatile int pending_listener_del;
+	volatile ProxySQL_Socket pending_listener_add;
+	volatile ProxySQL_Socket pending_listener_del;
 	unsigned int poll_timeout;
 	unsigned long loops;
 	StatCounters *loop_counters;

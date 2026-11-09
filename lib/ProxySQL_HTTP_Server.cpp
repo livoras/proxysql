@@ -18,9 +18,6 @@
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
-#include <sys/socket.h>
-#include <resolv.h>
-#include <arpa/inet.h>
 #include <pthread.h>
 #ifndef SPOOKYV2
 #include "SpookyV2.h"
@@ -28,9 +25,10 @@
 #endif
 
 #include <fcntl.h>
+#ifndef _WIN32
 #include <sys/utsname.h>
-
 #include "platform.h"
+#endif
 #include "microhttpd.h"
 #include "curl/curl.h"
 
@@ -149,6 +147,9 @@ static char *generate_home() {
 	}
 	html.append("<br>\n");
 	html.append("<b>OS version = </b>");
+#ifdef _WIN32
+	html.append("Windows");
+#else
 	{
 		struct utsname unameData;
 		int rc;
@@ -162,6 +163,7 @@ static char *generate_home() {
 			html.append("UNKNOWN");
 		}
 	}
+#endif
 	html.append("<br>\n");
 	html.append("<b>Worker threads = </b>");
 	{
@@ -538,8 +540,13 @@ int ProxySQL_HTTP_Server::handler(void *cls, struct MHD_Connection *connection, 
 			nl[0] = (char *)"User Time";
 			nl[1] = (char *)"System Time";
 			nv = (char **)malloc(sizeof(char *)*2);
-			nv[0] = extract_values(cpu_sqlite,2,true,(double)1/sysconf(_SC_CLK_TCK));
-			nv[1] = extract_values(cpu_sqlite,3,true,(double)1/sysconf(_SC_CLK_TCK));
+#ifdef _WIN32
+			const double ticks_per_second = 100.0;
+#else
+			const double ticks_per_second = sysconf(_SC_CLK_TCK);
+#endif
+			nv[0] = extract_values(cpu_sqlite, 2, true, 1.0 / ticks_per_second);
+			nv[1] = extract_values(cpu_sqlite, 3, true, 1.0 / ticks_per_second);
 			ts = extract_ts(cpu_sqlite,true);
 			s1 = generate_chart((char *)"myChart1",ts,2,nm,nl,nv);
 			s.append(s1.c_str());

@@ -102,7 +102,7 @@ index e8db51a0..684aff1a 100644
 +    }
 +
 +    /* Clear pointers for better safety */
-+    bzero((char*) &mysql->options,sizeof(mysql->options));
++    memset(&mysql->options, 0, sizeof(mysql->options));
 +    mysql->net.pvio= 0;
 +    if (mysql->free_me)
 +      free(mysql);
@@ -117,7 +117,7 @@ index e8db51a0..684aff1a 100644
  }
  
 -int STDCALL mysql_set_character_set(MYSQL *mysql, const char *csname)
-+int STDCALL mysql_set_character_set(MYSQL *mysql, const char *csname, uint charsetnr)
++int STDCALL mysql_set_character_set(MYSQL *mysql, const char *csname, unsigned int charsetnr)
  {
    const MARIADB_CHARSET_INFO *cs;
  

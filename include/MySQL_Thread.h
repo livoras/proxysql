@@ -205,15 +205,15 @@ class __attribute__((aligned(64))) MySQL_Thread
 
 	MySQL_Thread();
 	~MySQL_Thread();
-	MySQL_Session * create_new_session_and_client_data_stream(int _fd);
+	MySQL_Session * create_new_session_and_client_data_stream(ProxySQL_Socket _fd);
 	bool init();
 	void run___get_multiple_idle_connections(int& num_idles);
 	void run___cleanup_mirror_queue();
   	void ProcessAllMyDS_BeforePoll();
   	void ProcessAllMyDS_AfterPoll();
 	void run();
-  void poll_listener_add(int sock);
-  void poll_listener_del(int sock);
+  void poll_listener_add(ProxySQL_Socket sock);
+  void poll_listener_del(ProxySQL_Socket sock);
   void register_session(MySQL_Session*, bool up_start=true);
   void unregister_session(int);
   struct pollfd * get_pollfd(unsigned int i);
@@ -245,11 +245,11 @@ class MySQL_Listeners_Manager {
 	public:
   MySQL_Listeners_Manager();
 	~MySQL_Listeners_Manager();
-	int add(const char *iface, unsigned int num_threads, int **perthrsocks);
+	ProxySQL_Socket add(const char *iface, unsigned int num_threads, ProxySQL_Socket **perthrsocks);
 	int find_idx(const char *iface);
 	int find_idx(const char *address, int port);
-	iface_info * find_iface_from_fd(int fd);
-	int get_fd(unsigned int idx);
+	iface_info * find_iface_from_fd(ProxySQL_Socket fd);
+	ProxySQL_Socket get_fd(unsigned int idx);
 	void del(unsigned int idx);
 };
 
@@ -679,8 +679,8 @@ class MySQL_Threads_Handler
 	void init(unsigned int num=0, size_t stack=0);
 	proxysql_mysql_thread_t *create_thread(unsigned int tn, void *(*start_routine) (void *), bool);
 	void shutdown_threads();
-	int listener_add(const char *iface);
-	int listener_add(const char *address, int port);
+	ProxySQL_Socket listener_add(const char *iface);
+	ProxySQL_Socket listener_add(const char *address, int port);
 	int listener_del(const char *iface);
 	int listener_del(const char *address, int port);
 	void start_listeners();
@@ -699,7 +699,7 @@ class MySQL_Threads_Handler
 	unsigned long long get_mysql_backend_buffers_bytes();
 	unsigned long long get_mysql_frontend_buffers_bytes();
 	unsigned long long get_mysql_session_internal_bytes();
-	iface_info *MLM_find_iface_from_fd(int fd) {
+	iface_info *MLM_find_iface_from_fd(ProxySQL_Socket fd) {
 		return MLM->find_iface_from_fd(fd);
 	}
 	void Get_Memory_Stats();

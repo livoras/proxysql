@@ -75,7 +75,7 @@ void connect_cb(EV_P_ ev_io *w, int revents) {
 	if (revents & EV_WRITE) {
 		int optval = 0;
 		socklen_t optlen = sizeof(optval);
-		if ((getsockopt(w->fd, SOL_SOCKET, SO_ERROR, &optval, &optlen) == -1) ||
+		if ((getsockopt(w->fd, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&optval), &optlen) == -1) ||
 			(optval != 0)) {
 			/* Connection failed; try the next address in the list. */
 			//int errnum = optval ? optval : errno;
@@ -113,6 +113,10 @@ void connect_cb(EV_P_ ev_io *w, int revents) {
 }
 
 struct ev_io * new_connector(char *address, uint16_t gtid_port, uint16_t mysql_port) {
+#ifdef _WIN32
+	proxy_warning("GTID binlog reader is unavailable in the Windows build for %s:%u\n", address, mysql_port);
+	return nullptr;
+#else
 	int s;
 
 	if ((s = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
@@ -156,6 +160,7 @@ struct ev_io * new_connector(char *address, uint16_t gtid_port, uint16_t mysql_p
 		/* else error */
 	}
 	return NULL;
+#endif
 }
 
 
@@ -443,7 +448,11 @@ void * GTID_syncer_run() {
 	//struct ev_loop * gtid_ev_loop;
 	//gtid_ev_loop = NULL;
 	set_thread_name("GTID");
-	MyHGM->gtid_ev_loop = ev_loop_new (EVBACKEND_POLL | EVFLAG_NOENV);
+#ifdef _WIN32
+	MyHGM->gtid_ev_loop = ev_loop_new(EVBACKEND_SELECT | EVFLAG_NOENV);
+#else
+	MyHGM->gtid_ev_loop = ev_loop_new(EVBACKEND_POLL | EVFLAG_NOENV);
+#endif
 	if (MyHGM->gtid_ev_loop == NULL) {
 		proxy_error("could not initialise GTID sync loop\n");
 		exit(EXIT_FAILURE);

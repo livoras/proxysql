@@ -442,6 +442,13 @@ static void full_write(int fd, const char *buf, size_t len)
 
 void print_backtrace(void)
 {
+#ifdef _WIN32
+	void *frames[64];
+	const auto count = CaptureStackBackTrace(1, sizeof(frames) / sizeof(frames[0]), frames, nullptr);
+	for (unsigned int i = 0; i < count; ++i) {
+		fprintf(stderr, "%p\n", frames[i]);
+	}
+#else
 	static const char start[] = "BACKTRACE ------------\n";
 	static const char end[] = "----------------------\n";
 
@@ -460,6 +467,7 @@ void print_backtrace(void)
 	}
 	full_write(STDERR_FILENO, end, strlen(end));
 	free(bt_syms);
+#endif
 }
 
 #ifdef DEBUG

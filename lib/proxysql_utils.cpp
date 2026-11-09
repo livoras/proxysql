@@ -2,18 +2,23 @@
 #include "mysqld_error.h"
 
 #include <algorithm>
+#include <cerrno>
+#include <chrono>
 #include <functional>
 #include <sstream>
 #include <algorithm>
 #include <climits>
 
 #include <fcntl.h>
-#include <poll.h>
 #include <random>
 #include <signal.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#ifndef _WIN32
+#include <poll.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
+#endif
 #include <string.h>
 #include <unistd.h>
 
@@ -48,6 +53,12 @@ cfmt_t cstr_format(const char* fmt, ...) {
     }
  }
 
+uint64_t get_timestamp_us() {
+	using namespace std::chrono;
+	return duration_cast<microseconds>(system_clock::now().time_since_epoch()).count();
+}
+
+#ifndef _WIN32
 /**
  * @brief Kills the given process sending an initial 'SIGTERM' to it. If the process doesn't
  *   respond within 'timeout_us' to the initial signal a 'SIGKILL' is issued to it.
@@ -112,14 +123,6 @@ int read_pipe(int pipe_fd, std::string& sbuffer) {
 	}
 
 	return res;
-}
-
-uint64_t get_timestamp_us() {
-	struct timeval start_tv {};
-	gettimeofday(&start_tv, nullptr);
-	uint64_t start_timestamp = (1000000ull * start_tv.tv_sec) + start_tv.tv_usec;
-
-	return start_timestamp;
 }
 
 /**
@@ -372,6 +375,13 @@ int wexecvp(
 
 	return child_err;
 }
+#else
+int wexecvp(const std::string&, const std::vector<const char*>&, const to_opts_t&,
+	std::string&, std::string&) {
+	errno = ENOSYS;
+	return -2;
+}
+#endif
 
 std::vector<std::string> split_str(const std::string& s, char delimiter) {
 	std::vector<std::string> tokens {};
@@ -457,6 +467,7 @@ std::string get_checksum_from_hash(uint64_t hash) {
 	return string { &s_buf.front() };
 }
 
+#ifndef _WIN32
 void close_all_non_term_fd(std::vector<int> excludeFDs) {
 	DIR *d;
 	struct dirent *dir;
@@ -485,6 +496,7 @@ void close_all_non_term_fd(std::vector<int> excludeFDs) {
 		}
 	}
 }
+#endif
 
 std::pair<int,const char*> get_dollar_quote_error(const char* version) {
 	const char* ER_PARSE_MSG {
