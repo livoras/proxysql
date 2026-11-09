@@ -1,5 +1,6 @@
 #ifndef __CLASS_MYSQL_HOSTGROUPS_MANAGER_H
 #define __CLASS_MYSQL_HOSTGROUPS_MANAGER_H
+#include <cinttypes>
 #include "proxysql.h"
 #include "cpp.h"
 #include "proxysql_gtid.h"
@@ -1270,7 +1271,7 @@ T j_get_srv_default_int_val(
 				return val;
 			} else {
 				proxy_error(
-					"Invalid value %ld supplied for 'mysql_hostgroup_attributes.servers_defaults.%s' for hostgroup %d."
+					"Invalid value %" PRId64 " supplied for 'mysql_hostgroup_attributes.servers_defaults.%s' for hostgroup %d."
 						" Value NOT UPDATED.\n",
 					static_cast<int64_t>(val), key.c_str(), hid
 				);

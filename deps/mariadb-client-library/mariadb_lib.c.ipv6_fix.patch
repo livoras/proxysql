@@ -14,3 +14,13 @@ index c9aec200..be4c91d1 100644
        goto error;
      }
    }
+@@ -1764,5 +1769,9 @@ restart:
+   if (ma_net_init(net, pvio))
+   {
++    if (mysql->options.extension && mysql->options.extension->async_context &&
++        mysql->options.extension->async_context->pvio == pvio) {
++      mysql->options.extension->async_context->pvio = NULL;
++    }
+     ma_pvio_close(pvio);
+     goto error;
+   }

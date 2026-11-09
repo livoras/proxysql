@@ -1,3 +1,4 @@
+#include <cinttypes>
 #include "proxysql.h"
 #include "proxysql_atomic.h"
 
@@ -312,11 +313,11 @@ public:
 		sprintf(buf,"%d",line);
 		pta[2]=strdup(buf);
 		pta[3]=strdup(func);
-		sprintf(buf,"%lu",count_star);
+		sprintf(buf,"%" PRIu64,count_star);
 		pta[4]=strdup(buf);
-		sprintf(buf,"%ld", first_seen);
+		sprintf(buf,"%lld", static_cast<long long>(first_seen));
 		pta[5]=strdup(buf);
-		sprintf(buf,"%ld", last_seen);
+		sprintf(buf,"%lld", static_cast<long long>(last_seen));
 		pta[6]=strdup(buf);
 
 		return pta;

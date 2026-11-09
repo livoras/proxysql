@@ -916,7 +916,7 @@ unsigned long long Query_Processor::purge_query_digests_async(char **msg) {
 		unsigned long long curtime2=monotonic_time();
 		curtime1 = curtime1/1000;
 		curtime2 = curtime2/1000;
-		proxy_info("TRUNCATE stats_mysql_query_digest: (not locked) %llums to remove %lu entries\n", curtime2-curtime1, map1_size);
+		proxy_info("TRUNCATE stats_mysql_query_digest: (not locked) %llums to remove %zu entries\n", curtime2-curtime1, map1_size);
 	}
 	return ret;
 }
@@ -1096,7 +1096,7 @@ std::pair<SQLite3_result *, int> Query_Processor::get_query_digests_v2(const boo
 		curtime2=monotonic_time();
 		curtime1 = curtime1/1000;
 		curtime2 = curtime2/1000;
-		proxy_info("Running query on stats_mysql_query_digest: (not locked) %llums to retrieve %lu entries\n", curtime2-curtime1, map_size);
+		proxy_info("Running query on stats_mysql_query_digest: (not locked) %llums to retrieve %zu entries\n", curtime2-curtime1, map_size);
 	}
 
 	// Once we finish creating the resultset or writing to SQLite, we use a
@@ -1223,7 +1223,7 @@ SQLite3_result * Query_Processor::get_query_digests() {
 		curtime2=monotonic_time();
 		curtime1 = curtime1/1000;
 		curtime2 = curtime2/1000;
-		proxy_info("Running query on stats_mysql_query_digest: locked for %llums to retrieve %lu entries\n", curtime2-curtime1, map_size);
+		proxy_info("Running query on stats_mysql_query_digest: locked for %llums to retrieve %zu entries\n", curtime2-curtime1, map_size);
 	}
 	return result;
 }
@@ -1327,7 +1327,7 @@ std::pair<SQLite3_result *, int> Query_Processor::get_query_digests_reset_v2(
 		curtime2=monotonic_time();
 		curtime1 = curtime1/1000;
 		curtime2 = curtime2/1000;
-		proxy_info("Running query on stats_mysql_query_digest: (not locked) %llums to retrieve %lu entries\n", curtime2-curtime1, map_size);
+		proxy_info("Running query on stats_mysql_query_digest: (not locked) %llums to retrieve %zu entries\n", curtime2-curtime1, map_size);
 		if (free_me) {
 			if (defer_free) {
 				for (int i=0; i<n; i++) {
@@ -1430,7 +1430,7 @@ SQLite3_result * Query_Processor::get_query_digests_reset() {
 		curtime2=monotonic_time();
 		curtime1 = curtime1/1000;
 		curtime2 = curtime2/1000;
-		proxy_info("Running query on stats_mysql_query_digest_reset: locked for %llums to retrieve %lu entries\n", curtime2-curtime1, map_size);
+		proxy_info("Running query on stats_mysql_query_digest_reset: locked for %llums to retrieve %zu entries\n", curtime2-curtime1, map_size);
 		if (free_me) {
 			if (defer_free) {
 				for (int i=0; i<n; i++) {

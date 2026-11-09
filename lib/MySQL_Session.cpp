@@ -2127,15 +2127,15 @@ int MySQL_Session::handler_again___status_RESETTING_CONNECTION() {
 					( myerr ? myerr : ER_PROXYSQL_OFFLINE_SRV )
 				);
 				if (myerr != 0) {
-					proxy_error("Detected an error during COM_CHANGE_USER on (%d,%s,%d) , FD (Conn:%d , MyDS:%d) : %d, %s\n", myconn->parent->myhgc->hid, myconn->parent->address, myconn->parent->port, myds->fd, myds->myconn->fd, myerr, mysql_error(myconn->mysql));
+					proxy_error("Detected an error during COM_CHANGE_USER on (%d,%s,%d) , FD (Conn:%lld , MyDS:%lld) : %d, %s\n", myconn->parent->myhgc->hid, myconn->parent->address, myconn->parent->port, static_cast<long long>(myds->fd), static_cast<long long>(myds->myconn->fd), myerr, mysql_error(myconn->mysql));
 				} else {
 					proxy_error(
-						"Detected an error during COM_CHANGE_USER on (%d,%s,%d) , FD (Conn:%d , MyDS:%d) : %d, %s\n",
+						"Detected an error during COM_CHANGE_USER on (%d,%s,%d) , FD (Conn:%lld , MyDS:%lld) : %d, %s\n",
 						myconn->parent->myhgc->hid,
 						myconn->parent->address,
 						myconn->parent->port,
-						myds->fd,
-						myds->myconn->fd,
+						static_cast<long long>(myds->fd),
+						static_cast<long long>(myds->myconn->fd),
 						ER_PROXYSQL_OFFLINE_SRV,
 						"Detected offline server prior to statement execution"
 					);
@@ -3304,12 +3304,6 @@ bool MySQL_Session::handler_again___status_CONNECTING_SERVER(int *_rc) {
 				previous_status.pop();
 			}
 			if (mybe->server_myds->myconn) {
-				// NOTE-3404: Created connection never reached 'connect_cont' phase, due to that internal
-				// structures of 'mysql->net' are not fully initialized.  This induces a leak of the 'fd'
-				// associated with the socket opened by the library. To prevent this, we need to call
-				// `mysql_real_connect_cont` through `connect_cont`. This way we ensure a proper cleanup of
-				// all the resources when 'mysql_close' is later called. For more context see issue #3404.
-				mybe->server_myds->myconn->connect_cont(MYSQL_WAIT_TIMEOUT);
 				mybe->server_myds->destroy_MySQL_Connection_From_Pool(false);
 				if (mirror) {
 					PROXY_TRACE();
@@ -5940,7 +5934,6 @@ void MySQL_Session::handler___status_CONNECTING_CLIENT___STATE_SERVER_HANDSHAKE(
 			client_myds->rbio_ssl = BIO_new(BIO_s_mem());
 			client_myds->wbio_ssl = BIO_new(BIO_s_mem());
 			client_myds->ssl = GloVars.get_SSL_new();
-			SSL_set_fd(client_myds->ssl, client_myds->fd);
 			SSL_set_accept_state(client_myds->ssl);
 			SSL_set_bio(client_myds->ssl, client_myds->rbio_ssl, client_myds->wbio_ssl);
 			l_free(pkt->size,pkt->ptr);
@@ -8701,7 +8694,7 @@ void MySQL_Session::detected_broken_connection(const char *file, unsigned int li
 	unsigned long long last_used = thread->curtime - myconn->last_time_used;
 	last_used /= 1000;
 	if (verbose) {
-		proxy_error_inline(file, line, func, "Detected a broken connection while %s on (%d,%s,%d,%lu) , FD (Conn:%d , MyDS:%d) , user %s , last_used %llums ago : %d, %s\n" , action , myconn->parent->myhgc->hid, myconn->parent->address, myconn->parent->port, myconn->get_mysql_thread_id() , myconn->myds->fd , myconn->fd , myconn->userinfo->username, last_used, myerr, msg);
+		proxy_error_inline(file, line, func, "Detected a broken connection while %s on (%d,%s,%d,%lu) , FD (Conn:%lld , MyDS:%lld) , user %s , last_used %llums ago : %d, %s\n" , action , myconn->parent->myhgc->hid, myconn->parent->address, myconn->parent->port, myconn->get_mysql_thread_id() , static_cast<long long>(myconn->myds->fd) , static_cast<long long>(myconn->fd) , myconn->userinfo->username, last_used, myerr, msg);
 	} else {
 		proxy_error_inline(file, line, func, "Detected a broken connection while %s on (%d,%s,%d,%lu) , user %s , last_used %llums ago : %d, %s\n", action, myconn->parent->myhgc->hid, myconn->parent->address, myconn->parent->port, myconn->get_mysql_thread_id(), myconn->userinfo->username, last_used, myerr, msg);
 	}

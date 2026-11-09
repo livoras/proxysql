@@ -12,7 +12,7 @@ class iface_info {
 	char *address;
 	int port;
 	ProxySQL_Socket fd;
-	iface_info(char *_i, char *_a, int p, ProxySQL_Socket f) {
+	iface_info(const char *_i, const char *_a, int p, ProxySQL_Socket f) {
 		iface=strdup(_i);
 		address=strdup(_a);
 		port=p;

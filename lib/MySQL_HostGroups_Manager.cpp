@@ -1,3 +1,4 @@
+#include <cinttypes>
 #include "MySQL_HostGroups_Manager.h"
 #include "proxysql.h"
 #include "cpp.h"
@@ -970,7 +971,7 @@ void MySQL_HostGroups_Manager::CUCFT1(
 			uint64_t hash1_ = resultset->raw_checksum();
 			raw_checksum = hash1_;
 			myhash.Update(&hash1_, sizeof(hash1_));
-			proxy_info("Checksum for table %s is 0x%lX\n", TableName.c_str(), hash1_);
+			proxy_info("Checksum for table %s is 0x%" PRIX64 "\n", TableName.c_str(), hash1_);
 		}
 		delete resultset;
 	} else {
@@ -1018,7 +1019,7 @@ void MySQL_HostGroups_Manager::update_hostgroup_manager_mappings() {
 	if (hgsm_mysql_servers_checksum != table_resultset_checksum[HGM_TABLES::MYSQL_SERVERS] ||
 		hgsm_mysql_replication_hostgroups_checksum != table_resultset_checksum[HGM_TABLES::MYSQL_REPLICATION_HOSTGROUPS])
 	{
-		proxy_info("Rebuilding 'Hostgroup_Manager_Mapping' due to checksums change - mysql_servers { old: 0x%lX, new: 0x%lX }, mysql_replication_hostgroups { old:0x%lX, new:0x%lX }\n",
+		proxy_info("Rebuilding 'Hostgroup_Manager_Mapping' due to checksums change - mysql_servers { old: 0x%" PRIX64 ", new: 0x%" PRIX64 " }, mysql_replication_hostgroups { old:0x%" PRIX64 ", new:0x%" PRIX64 " }\n",
 			hgsm_mysql_servers_checksum, table_resultset_checksum[HGM_TABLES::MYSQL_SERVERS],
 			hgsm_mysql_replication_hostgroups_checksum, table_resultset_checksum[HGM_TABLES::MYSQL_REPLICATION_HOSTGROUPS]);
 
@@ -1452,7 +1453,7 @@ bool MySQL_HostGroups_Manager::commit(
 				}
 				if (atoi(r->fields[7])!=atoi(r->fields[17])) {
 					if (GloMTH->variables.hostgroup_manager_verbose)
-					proxy_info("Changing max_connections for server %d:%s:%d (%s:%d) from %d (%ld) to %d\n" , mysrvc->myhgc->hid , mysrvc->address, mysrvc->port, r->fields[1], atoi(r->fields[2]), atoi(r->fields[7]) , mysrvc->max_connections , atoi(r->fields[17]));
+					proxy_info("Changing max_connections for server %d:%s:%d (%s:%d) from %d (%" PRId64 ") to %d\n" , mysrvc->myhgc->hid , mysrvc->address, mysrvc->port, r->fields[1], atoi(r->fields[2]), atoi(r->fields[7]) , mysrvc->max_connections , atoi(r->fields[17]));
 					mysrvc->max_connections=atoi(r->fields[17]);
 				}
 				if (atoi(r->fields[8])!=atoi(r->fields[18])) {
@@ -1658,7 +1659,7 @@ uint64_t MySQL_HostGroups_Manager::get_mysql_servers_checksum(SQLite3_result* ru
 	}
 
 	table_resultset_checksum[HGM_TABLES::MYSQL_SERVERS] = resultset != nullptr ? resultset->raw_checksum() : 0;
-	proxy_info("Checksum for table %s is 0x%lX\n", "mysql_servers", table_resultset_checksum[HGM_TABLES::MYSQL_SERVERS]);
+	proxy_info("Checksum for table %s is 0x%" PRIX64 "\n", "mysql_servers", table_resultset_checksum[HGM_TABLES::MYSQL_SERVERS]);
 
 	return table_resultset_checksum[HGM_TABLES::MYSQL_SERVERS];
 }
@@ -1862,7 +1863,7 @@ void MySQL_HostGroups_Manager::generate_mysql_servers_table(int *_onlyhg) {
 						st=(char *)"SHUNNED";
 						break;
 				}
-				fprintf(stderr,"HID: %d , address: %s , port: %d , gtid_port: %d , weight: %ld , status: %s , max_connections: %ld , max_replication_lag: %u , use_ssl: %u , max_latency_ms: %u , comment: %s\n", mysrvc->myhgc->hid, mysrvc->address, mysrvc->port, mysrvc->gtid_port, mysrvc->weight, st, mysrvc->max_connections, mysrvc->max_replication_lag, mysrvc->use_ssl, mysrvc->max_latency_us*1000, mysrvc->comment);
+				fprintf(stderr,"HID: %d , address: %s , port: %d , gtid_port: %d , weight: %" PRId64 " , status: %s , max_connections: %" PRId64 " , max_replication_lag: %u , use_ssl: %u , max_latency_ms: %u , comment: %s\n", mysrvc->myhgc->hid, mysrvc->address, mysrvc->port, mysrvc->gtid_port, mysrvc->weight, st, mysrvc->max_connections, mysrvc->max_replication_lag, mysrvc->use_ssl, mysrvc->max_latency_us*1000, mysrvc->comment);
 			}
 			lst->add(mysrvc);
 			if (lst->len==32) {
@@ -2479,7 +2480,7 @@ void MySQL_HostGroups_Manager::unshun_server_all_hostgroups(const char * address
 		} else {
 			sprintf(buf,"%u", *skip_hid);
 		}
-		proxy_info("Calling unshun_server_all_hostgroups() for server %s:%d . Arguments: %lu , %d , %s\n" , address, port, t, max_wait_sec, buf);
+		proxy_info("Calling unshun_server_all_hostgroups() for server %s:%d . Arguments: %lld , %d , %s\n" , address, port, static_cast<long long>(t), max_wait_sec, buf);
 	}
 	int i, j;
 	for (i=0; i<(int)MyHostGroups->len; i++) {
@@ -2507,7 +2508,7 @@ void MySQL_HostGroups_Manager::unshun_server_all_hostgroups(const char * address
 							(mysrvc->shunned_and_kill_all_connections==true && mysrvc->ConnectionsUsed->conns_length()==0 && mysrvc->ConnectionsFree->conns_length()==0) // if shunned_and_kill_all_connections is set, ensure all connections are already dropped
 						) {
 							if (GloMTH->variables.hostgroup_manager_verbose >= 3) {
-								proxy_info("Unshunning server %d:%s:%d . time_last_detected_error=%lu\n", mysrvc->myhgc->hid, address, port, mysrvc->time_last_detected_error);
+								proxy_info("Unshunning server %d:%s:%d . time_last_detected_error=%lld\n", mysrvc->myhgc->hid, address, port, static_cast<long long>(mysrvc->time_last_detected_error));
 							}
 							mysrvc->set_status(MYSQL_SERVER_STATUS_ONLINE);
 							mysrvc->shunned_automatic=false;
@@ -3265,7 +3266,7 @@ SQLite3_result * MySQL_HostGroups_Manager::SQL3_Free_Connections() {
 			for (l=0; l < (int) mysrvc->ConnectionsFree->conns_length(); l++) {
 				char **pta=(char **)malloc(sizeof(char *)*colnum);
 				MySQL_Connection *conn = mysrvc->ConnectionsFree->index(l);
-				sprintf(buf,"%d", conn->fd);
+				sprintf(buf,"%lld", static_cast<long long>(conn->fd));
 				pta[0]=strdup(buf);
 				sprintf(buf,"%d", (int)myhgc->hid);
 				pta[1]=strdup(buf);
@@ -3741,7 +3742,7 @@ void MySQL_HostGroups_Manager::read_only_action(char *hostname, int port, int re
 			s += r->fields[1];
 			read_only_set1.insert(s);
 		}
-		proxy_info("Regenerating read_only_set1 with %lu servers\n", read_only_set1.size());
+		proxy_info("Regenerating read_only_set1 with %zu servers\n", read_only_set1.size());
 		if (read_only_set1.empty()) {
 			// to avoid regenerating this set always with 0 entries, we generate a fake entry
 			read_only_set1.insert("----:::----");
@@ -5079,7 +5080,7 @@ void MySQL_HostGroups_Manager::update_group_replication_add_autodiscovered(
 				update_hg_attrs_server_defaults(mysrvc, mysrvc->myhgc);
 				proxy_info(
 					"Found healthy previously discovered GR node %s:%d as 'OFFLINE_HARD', setting back as 'ONLINE' with:"
-						" hostgroup=%d, weight=%ld, max_connections=%ld, use_ssl=%d\n",
+						" hostgroup=%d, weight=%" PRId64 ", max_connections=%" PRId64 ", use_ssl=%d\n",
 					_host.c_str(), _port, reader_hg, mysrvc->weight, mysrvc->max_connections, mysrvc->use_ssl
 				);
 				mysrvc->set_status(MYSQL_SERVER_STATUS_ONLINE);
@@ -5094,7 +5095,7 @@ void MySQL_HostGroups_Manager::update_group_replication_add_autodiscovered(
 		);
 		add(mysrvc, reader_hg);
 		proxy_info(
-			"Adding new discovered GR node %s:%d with: hostgroup=%d, weight=%ld, max_connections=%ld, use_ssl=%d\n",
+			"Adding new discovered GR node %s:%d with: hostgroup=%d, weight=%" PRId64 ", max_connections=%" PRId64 ", use_ssl=%d\n",
 			_host.c_str(), _port, reader_hg, mysrvc->weight, mysrvc->max_connections, mysrvc->use_ssl
 		);
 	}
@@ -6139,10 +6140,10 @@ class MySQL_Errors_stats {
 		sprintf(buf,"%llu",count_star);
 		pta[7]=strdup(buf);
 
-		sprintf(buf,"%ld", first_seen);
+		sprintf(buf,"%lld", static_cast<long long>(first_seen));
 		pta[8]=strdup(buf);
 
-		sprintf(buf,"%ld", last_seen);
+		sprintf(buf,"%lld", static_cast<long long>(last_seen));
 		pta[9]=strdup(buf);
 
 		assert(last_error);
@@ -6845,7 +6846,7 @@ int MySQL_HostGroups_Manager::create_new_server_in_hg(
 		);
 		add(mysrvc,hid);
 		proxy_info(
-			"Adding new discovered %s node %s:%d with: hostgroup=%d, weight=%ld, max_connections=%ld, use_ssl=%d\n",
+			"Adding new discovered %s node %s:%d with: hostgroup=%d, weight=%" PRId64 ", max_connections=%" PRId64 ", use_ssl=%d\n",
 			srv_info.kind.c_str(), c_hostname, srv_info.port, hid, mysrvc->weight, mysrvc->max_connections,
 			mysrvc->use_ssl
 		);
@@ -6864,7 +6865,7 @@ int MySQL_HostGroups_Manager::create_new_server_in_hg(
 
 			proxy_info(
 				"Found healthy previously discovered %s node %s:%d as 'OFFLINE_HARD', setting back as 'ONLINE' with:"
-					" hostgroup=%d, weight=%ld, max_connections=%ld, use_ssl=%d\n",
+					" hostgroup=%d, weight=%" PRId64 ", max_connections=%" PRId64 ", use_ssl=%d\n",
 				srv_info.kind.c_str(), srv_info.addr.c_str(), srv_info.port, hid, mysrvc->weight,
 				mysrvc->max_connections, mysrvc->use_ssl
 			);
@@ -6885,7 +6886,7 @@ int MySQL_HostGroups_Manager::remove_server_in_hg(uint32_t hid, const string& ad
 	uint64_t mysrvc_addr = reinterpret_cast<uint64_t>(mysrvc);
 
 	proxy_warning(
-		"Removed server at address %ld, hostgroup %d, address %s port %d."
+		"Removed server at address %" PRIu64 ", hostgroup %d, address %s port %d."
 		" Setting status OFFLINE HARD and immediately dropping all free connections."
 		" Used connections will be dropped when trying to use them\n",
 		mysrvc_addr, hid, mysrvc->address, mysrvc->port
@@ -7410,7 +7411,7 @@ unsigned int MySQL_HostGroups_Manager::HostGroup_Server_Mapping::get_hostgroup_i
 	else if (type == Type::READER)
 		return node.reader_hostgroup_id;
 	else
-		assert(0);
+		std::abort();
 }
 
 MySrvC* MySQL_HostGroups_Manager::HostGroup_Server_Mapping::insert_HGM(unsigned int hostgroup_id, const MySrvC* srv) {
@@ -7440,7 +7441,7 @@ MySrvC* MySQL_HostGroups_Manager::HostGroup_Server_Mapping::insert_HGM(unsigned 
 				if (GloMTH->variables.hostgroup_manager_verbose) {
 					proxy_info(
 						"Found server node in Host Group Container %s:%d as 'OFFLINE_HARD', setting back as 'ONLINE' with:"
-						" hostgroup_id=%d, gtid_port=%d, weight=%ld, compression=%d, max_connections=%ld, use_ssl=%d,"
+						" hostgroup_id=%d, gtid_port=%d, weight=%" PRId64 ", compression=%d, max_connections=%" PRId64 ", use_ssl=%d,"
 						" max_replication_lag=%d, max_latency_ms=%d, comment=%s\n",
 						mysrvc->address, mysrvc->port, hostgroup_id, mysrvc->gtid_port, mysrvc->weight, mysrvc->compression,
 						mysrvc->max_connections, mysrvc->use_ssl, mysrvc->max_replication_lag, (mysrvc->max_latency_us / 1000),
@@ -7455,7 +7456,7 @@ MySrvC* MySQL_HostGroups_Manager::HostGroup_Server_Mapping::insert_HGM(unsigned 
 	
 	if (!ret_srv) {
 		if (GloMTH->variables.hostgroup_manager_verbose) {
-			proxy_info("Creating new server in HG %d : %s:%d , gtid_port=%d, weight=%ld, status=%d\n", hostgroup_id, srv->address, srv->port, srv->gtid_port, srv->weight, (int)srv->get_status());
+			proxy_info("Creating new server in HG %d : %s:%d , gtid_port=%d, weight=%" PRId64 ", status=%d\n", hostgroup_id, srv->address, srv->port, srv->gtid_port, srv->weight, (int)srv->get_status());
 		}
 
 		proxy_debug(PROXY_DEBUG_MYSQL_CONNPOOL, 5, "Adding new server %s:%d , weight=%ld, status=%d, mem_ptr=%p into hostgroup=%d\n", srv->address, srv->port, srv->weight, (int)srv->get_status(), srv, hostgroup_id);

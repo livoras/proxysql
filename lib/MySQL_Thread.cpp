@@ -219,39 +219,27 @@ ProxySQL_Socket MySQL_Listeners_Manager::add(const char *iface, unsigned int num
 		}
 	}
 
-	char *address=NULL; char *port=NULL;
-	ProxySQL_Socket s = PROXYSQL_INVALID_SOCKET;
-	char *h = NULL;
-	bool is_ipv6 = false;
-
-	if (*(char *)iface == '[') {
-		is_ipv6 = true;
-		char *p = strchr((char *)iface, ']');
-		if (p == NULL) {
-			proxy_error("Invalid IPv6 address: %s\n", iface);
-			return PROXYSQL_INVALID_SOCKET;
-		}
-		h = (char *)++iface; // remove first '['
-		*p = '\0';
-		iface = p++; // remove last ']'
-		address = h;
-		port = ++p; // remove ':'
-	} else {
-		c_split_2(iface, ":" , &address, &port);
+	ProxySQL_Listener_Address endpoint;
+	if (!parse_listener_address(iface, endpoint)) {
+		proxy_error("Invalid MySQL listener address: %s\n", iface);
+		return PROXYSQL_INVALID_SOCKET;
 	}
+	const char *address = endpoint.host.c_str();
+	const auto port = endpoint.port;
+	ProxySQL_Socket s = PROXYSQL_INVALID_SOCKET;
 
 #ifdef SO_REUSEPORT
 	if (GloVars.global.reuseport==false) {
-		s = ( atoi(port) ? listen_on_port(address, atoi(port), PROXYSQL_LISTEN_LEN) : listen_on_unix(address, PROXYSQL_LISTEN_LEN));
+		s = ( port ? listen_on_port(address, port, PROXYSQL_LISTEN_LEN) : listen_on_unix(address, PROXYSQL_LISTEN_LEN));
 	} else {
-		if (atoi(port)==0) {
+		if (port==0) {
 			s = listen_on_unix(address, PROXYSQL_LISTEN_LEN);
 		} else {
 			// for TCP we will use SO_REUSEPORT
 			auto *l_perthrsocks = static_cast<ProxySQL_Socket *>(malloc(sizeof(ProxySQL_Socket) * num_threads));
 			unsigned int i;
 			for (i=0;i<num_threads;i++) {
-				s=listen_on_port(address, atoi(port), PROXYSQL_LISTEN_LEN, true);
+				s=listen_on_port(address, port, PROXYSQL_LISTEN_LEN, true);
 				if (s == PROXYSQL_INVALID_SOCKET) {
 					break;
 				}
@@ -263,7 +251,7 @@ ProxySQL_Socket MySQL_Listeners_Manager::add(const char *iface, unsigned int num
 			}
 			if (i == num_threads) {
 				for (i=0;i<num_threads;i++) {
-					ifaces->add(new iface_info((char *)iface, address, atoi(port), l_perthrsocks[i]));
+					ifaces->add(new iface_info(iface, address, port, l_perthrsocks[i]));
 				}
 				*perthrsocks=l_perthrsocks;
 				s=0;
@@ -277,7 +265,7 @@ ProxySQL_Socket MySQL_Listeners_Manager::add(const char *iface, unsigned int num
 		}
 	}
 #else
-	s = ( atoi(port) ? listen_on_port(address, atoi(port), PROXYSQL_LISTEN_LEN) : listen_on_unix(address, PROXYSQL_LISTEN_LEN));
+	s = ( port ? listen_on_port(address, port, PROXYSQL_LISTEN_LEN) : listen_on_unix(address, PROXYSQL_LISTEN_LEN));
 #endif /* SO_REUSEPORT */
 	if (s != PROXYSQL_INVALID_SOCKET && *perthrsocks == nullptr) {
 		if (proxysql_socket_nonblocking(s) != 0) {
@@ -285,12 +273,8 @@ ProxySQL_Socket MySQL_Listeners_Manager::add(const char *iface, unsigned int num
 			proxysql_socket_close(s);
 			s = PROXYSQL_INVALID_SOCKET;
 		} else {
-			ifaces->add(new iface_info((char *)iface, address, atoi(port), s));
+			ifaces->add(new iface_info(iface, address, port, s));
 		}
-	}
-	if (is_ipv6 == false) {
-		free(address);
-		free(port);
 	}
 
 	return s;
@@ -2623,7 +2607,7 @@ char** client_host_cache_entry_row(
 	row[0]=strdup(address.c_str());
 	sprintf(buff, "%u", entry.error_count);
 	row[1]=strdup(buff);
-	sprintf(buff, "%lu", last_updated);
+	sprintf(buff, "%lld", static_cast<long long>(last_updated));
 	row[2]=strdup(buff);
 
 	return row;
@@ -6120,7 +6104,7 @@ void MySQL_Thread::check_for_invalid_fd(unsigned int n) {
 		MySQL_Data_Stream *_myds=mypolls.myds[n];
 		if (_myds) {
 			if (_myds->myconn) {
-				proxy_error("revents==POLLNVAL for FD=%lld, events=%d, MyDSFD=%d, MyConnFD=%d\n", static_cast<long long>(mypolls.fds[n].fd), mypolls.fds[n].events, _myds->fd, _myds->myconn->fd);
+				proxy_error("revents==POLLNVAL for FD=%lld, events=%d, MyDSFD=%lld, MyConnFD=%lld\n", static_cast<long long>(mypolls.fds[n].fd), mypolls.fds[n].events, static_cast<long long>(_myds->fd), static_cast<long long>(_myds->myconn->fd));
 				assert(mypolls.fds[n].revents!=POLLNVAL);
 			}
 		}

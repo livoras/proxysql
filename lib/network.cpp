@@ -2,6 +2,7 @@
 #include "proxysql_debug.h"
 
 #include <cerrno>
+#include <charconv>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -15,6 +16,38 @@
 #include <sys/un.h>
 #include <unistd.h>
 #endif
+
+bool parse_listener_address(std::string_view listener_spec, ProxySQL_Listener_Address &address) {
+	if (listener_spec.empty()) {
+		return false;
+	}
+	size_t host_start = 0;
+	size_t host_end = listener_spec.find(':');
+	size_t port_start = host_end;
+	if (listener_spec.front() == '[') {
+		host_start = 1;
+		host_end = listener_spec.find(']');
+		if (host_end == std::string_view::npos || host_end + 1 >= listener_spec.size() ||
+			listener_spec[host_end + 1] != ':') {
+			return false;
+		}
+		port_start = host_end + 1;
+	} else if (host_end == std::string_view::npos) {
+		address = {std::string(listener_spec), 0};
+		return true;
+	}
+	if (host_end == host_start) {
+		return false;
+	}
+	uint16_t port = 0;
+	const char *end = listener_spec.data() + listener_spec.size();
+	const auto result = std::from_chars(listener_spec.data() + port_start + 1, end, port);
+	if (result.ec != std::errc{} || result.ptr != end || port == 0) {
+		return false;
+	}
+	address = {std::string(listener_spec.substr(host_start, host_end - host_start)), port};
+	return true;
+}
 
 ProxySQL_Socket listen_on_port(const char *ip, uint16_t port, int backlog, bool reuseport) {
 	if (!proxysql_socket_init()) {

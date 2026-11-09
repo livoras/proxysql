@@ -88,6 +88,7 @@ add_executable(proxysql
     ${library_sources}
 )
 target_compile_features(proxysql PRIVATE cxx_std_17)
+target_compile_options(proxysql PRIVATE -Werror=format)
 target_compile_definitions(proxysql PRIVATE
     NOJEM NOMINMAX WIN32_LEAN_AND_MEAN GITVERSION="${git_version}-windows"
 )

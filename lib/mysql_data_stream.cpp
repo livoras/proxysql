@@ -519,8 +519,8 @@ int MySQL_Data_Stream::read_from_net() {
 						// client can drive a heap out-of-bounds write into the fixed-size
 						// 32KB input queue by sending an oversized first MySQL packet.
 						if (Hdr.pkt_length > (unsigned int)(s - 4)) {
-							proxy_error("Oversized first packet from client: pkt_length=%u exceeds queue capacity (%d). Closing fd=%d\n",
-								Hdr.pkt_length, s - 4, fd);
+							proxy_error("Oversized first packet from client: pkt_length=%u exceeds queue capacity (%d). Closing fd=%lld\n",
+								Hdr.pkt_length, s - 4, static_cast<long long>(fd));
 							shut_soft();
 							return -1;
 						}

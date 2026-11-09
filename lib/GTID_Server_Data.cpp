@@ -1,3 +1,4 @@
+#include <cinttypes>
 #include "MySQL_HostGroups_Manager.h"
 
 #include "ev.h"
@@ -321,7 +322,7 @@ bool GTID_Server_Data::read_next_gtid() {
 				} else { // we are reading the trxids
 					uint64_t trx_from;
 					uint64_t trx_to;
-					sscanf(subtoken,"%lu-%lu",&trx_from,&trx_to);
+					sscanf(subtoken,"%" SCNu64 "-%" SCNu64,&trx_from,&trx_to);
 					//fprintf(stdout,"BS from %s:%lu-%lu\n", uuid_server, trx_from, trx_to);
 					std::string s = uuid_server;
 					gtid_executed[s].emplace_back(trx_from, trx_to);

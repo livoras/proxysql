@@ -1,3 +1,4 @@
+#include <cinttypes>
 #include "prometheus/counter.h"
 #include "btree_map.h"
 #include "proxysql.h"
@@ -869,49 +870,49 @@ SQLite3_result * Query_Cache::SQL3_getStats() {
 	// NOTE: as there is no string copy, we do NOT free pta[0] and pta[1]
 	{ // Used Memoery
 		pta[0]=(char *)"Query_Cache_Memory_bytes";
-		sprintf(buf,"%lu", get_data_size_total());
+		sprintf(buf,"%" PRIu64, get_data_size_total());
 		pta[1]=buf;
 		result->add_row(pta);
 	}
 	{ // Glo_cntGet
 		pta[0]=(char *)"Query_Cache_count_GET";
-		sprintf(buf,"%lu", Glo_cntGet);
+		sprintf(buf,"%" PRIu64, Glo_cntGet);
 		pta[1]=buf;
 		result->add_row(pta);
 	}
 	{ // Glo_cntGetOK
 		pta[0]=(char *)"Query_Cache_count_GET_OK";
-		sprintf(buf,"%lu", Glo_cntGetOK);
+		sprintf(buf,"%" PRIu64, Glo_cntGetOK);
 		pta[1]=buf;
 		result->add_row(pta);
 	}
 	{ // Glo_cntSet
 		pta[0]=(char *)"Query_Cache_count_SET";
-		sprintf(buf,"%lu", Glo_cntSet);
+		sprintf(buf,"%" PRIu64, Glo_cntSet);
 		pta[1]=buf;
 		result->add_row(pta);
 	}
 	{ // Glo_dataIN
 		pta[0]=(char *)"Query_Cache_bytes_IN";
-		sprintf(buf,"%lu", Glo_dataIN);
+		sprintf(buf,"%" PRIu64, Glo_dataIN);
 		pta[1]=buf;
 		result->add_row(pta);
 	}
 	{ // Glo_dataOUT
 		pta[0]=(char *)"Query_Cache_bytes_OUT";
-		sprintf(buf,"%lu", Glo_dataOUT);
+		sprintf(buf,"%" PRIu64, Glo_dataOUT);
 		pta[1]=buf;
 		result->add_row(pta);
 	}
 	{ // Glo_cntPurge
 		pta[0]=(char *)"Query_Cache_Purged";
-		sprintf(buf,"%lu", Glo_cntPurge);
+		sprintf(buf,"%" PRIu64, Glo_cntPurge);
 		pta[1]=buf;
 		result->add_row(pta);
 	}
 	{ // Glo_num_entries
 		pta[0]=(char *)"Query_Cache_Entries";
-		sprintf(buf,"%lu", Glo_num_entries);
+		sprintf(buf,"%" PRIu64, Glo_num_entries);
 		pta[1]=buf;
 		result->add_row(pta);
 	}

@@ -1125,8 +1125,14 @@ static void * sqlite3server_main_loop(void *arg)
 	int *callback_func=((struct _main_args *)arg)->callback_func;
 	volatile int *shutdown=((struct _main_args *)arg)->shutdown;
 	fds[nfds++] = { GloAdmin->poll_wakeup_handle(), POLLIN, 0 };
-	char *socket_names[MAX_SQLITE3SERVER_LISTENERS];
-	for (i=0;i<MAX_SQLITE3SERVER_LISTENERS;i++) { socket_names[i]=NULL; }
+	std::string socket_names[MAX_SQLITE3SERVER_LISTENERS];
+	bool unix_sockets[MAX_SQLITE3SERVER_LISTENERS] {};
+	const auto close_listener = [&](int index) {
+		proxysql_socket_close(fds[index].fd);
+		if (unix_sockets[index]) {
+			unlink(socket_names[index].c_str());
+		}
+	};
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
@@ -1161,8 +1167,11 @@ static void * sqlite3server_main_loop(void *arg)
 					pthread_attr_getstacksize (&attr, &stacks);
 					client = static_cast<ProxySQL_Socket *>(malloc(sizeof(ProxySQL_Socket)));
 					*client= client_t;
-					if ( pthread_create(&child, &attr, child_func[callback_func[i]], client) != 0 )
+					if ( pthread_create(&child, &attr, child_func[callback_func[i]], client) != 0 ) {
 						perror("Thread creation");
+						proxysql_socket_close(client_t);
+						free(client);
+					}
 				} else {
 					proxy_error("accept() error: %s\n", strerror(errno));
 				}
@@ -1174,7 +1183,7 @@ static void * sqlite3server_main_loop(void *arg)
 		// This means that trying to set a 'mysql_ifaces' to an address that is
 		// already taken will result into an 'assert' in ProxySQL side.
 		if (nfds == 1 && fds[0].revents == POLLNVAL) {
-			proxy_error("revents==POLLNVAL for FD=%d, events=%d\n", fds[i].fd, fds[i].events);
+			proxy_error("revents==POLLNVAL for FD=%lld, events=%d\n", static_cast<long long>(fds[0].fd), fds[0].events);
 			if (glovars.shutdown==0 && *shutdown==0) {
 				assert(fds[0].revents != POLLNVAL);
 			}
@@ -1183,65 +1192,57 @@ __end_while_pool:
 		if (S_amll.get_version()!=version) {
 			S_amll.wrlock();
 			version=S_amll.get_version();
-			for (i=1; i<nfds; i++) {
-				char *add=NULL; char *port=NULL;
-				proxysql_socket_close(fds[i].fd);
-				if (socket_names[i] != NULL) { // this should skip socket_names[0] , because it is a pipe
-					c_split_2(socket_names[i], ":" , &add, &port);
-					if (atoi(port)==0) { unlink(socket_names[i]); }
+			auto *interfaces = S_amll.ifaces_mysql->ifaces;
+			for (i = nfds - 1; i > 0; --i) {
+				bool retained = false;
+				for (unsigned int j = 0; j < interfaces->len; ++j) {
+					if (socket_names[i] == static_cast<const char *>(interfaces->index(j))) {
+						retained = true;
+						break;
+					}
+				}
+				if (!retained) {
+					close_listener(i);
+					--nfds;
+					if (i != nfds) {
+						fds[i] = fds[nfds];
+						callback_func[i] = callback_func[nfds];
+						socket_names[i] = std::move(socket_names[nfds]);
+						unix_sockets[i] = unix_sockets[nfds];
+					}
 				}
 			}
-			nfds=0;
-			fds[nfds].fd=GloAdmin->poll_wakeup_handle();
-			fds[nfds].events=POLLIN;
-			fds[nfds].revents=0;
-			nfds++;
-			unsigned int j;
-			i=0; j=0;
-			for (j=0; j<S_amll.ifaces_mysql->ifaces->len; j++) {
-				char *add=NULL; char *port=NULL; char *sn=(char *)S_amll.ifaces_mysql->ifaces->index(j);
-
-                                char *h = NULL;
-                                if (*sn == '[') {
-                                        char *p = strchr(sn, ']');
-                                        if (p == NULL)
-                                                proxy_error("Invalid IPv6 address: %s\n", sn);
-
-                                        h = ++sn; // remove first '['
-                                        *p = '\0';
-                                        sn = p++; // remove last ']'
-                                        add = h;
-                                        port = ++p; // remove ':'
-                                } else {
-                                        c_split_2(sn, ":" , &add, &port);
-                                }
-
-#ifdef SO_REUSEPORT
-				ProxySQL_Socket s = ( atoi(port) ? listen_on_port(add, atoi(port), 128, true) : listen_on_unix(add, 128));
-#else
-				ProxySQL_Socket s = ( atoi(port) ? listen_on_port(add, atoi(port), 128) : listen_on_unix(add, 128));
-#endif // SO_REUSEPORT
-				if (s != PROXYSQL_INVALID_SOCKET) { fds[nfds].fd=s; fds[nfds].events=POLLIN; fds[nfds].revents=0; callback_func[nfds]=0; socket_names[nfds]=strdup(sn); nfds++; }
-				if (add) free(add);
-				if (port) free(port);
+			for (unsigned int j = 0; j < interfaces->len; ++j) {
+				const auto *listener_spec = static_cast<const char *>(interfaces->index(j));
+				if (std::find(socket_names + 1, socket_names + nfds, listener_spec) != socket_names + nfds) {
+					continue;
+				}
+				if (nfds == MAX_SQLITE3SERVER_LISTENERS) {
+					proxy_error("Too many SQLite3 server listeners\n");
+					break;
+				}
+				ProxySQL_Listener_Address endpoint;
+				if (!parse_listener_address(listener_spec, endpoint)) {
+					proxy_error("Invalid SQLite3 server listener address: %s\n", listener_spec);
+					continue;
+				}
+				const auto socket = endpoint.port
+					? listen_on_port(endpoint.host.c_str(), endpoint.port, 128, true)
+					: listen_on_unix(endpoint.host.c_str(), 128);
+				if (socket != PROXYSQL_INVALID_SOCKET) {
+					fds[nfds] = { socket, POLLIN, 0 };
+					callback_func[nfds] = 0;
+					socket_names[nfds] = listener_spec;
+					unix_sockets[nfds] = endpoint.port == 0;
+					++nfds;
+				}
 			}
 			S_amll.wrunlock();
 		}
 
 	}
-	//if (__sync_add_and_fetch(shutdown,0)==0) __sync_add_and_fetch(shutdown,1);
-	for (i=1; i<nfds; i++) {
-		char *add=NULL; char *port=NULL;
-		proxysql_socket_close(fds[i].fd);
-		c_split_2(socket_names[i], ":" , &add, &port);
-		if (atoi(port)==0) {
-			if (socket_names[i]) {
-				unlink(socket_names[i]);
-			}
-		}
-		if (socket_names[i]) free(socket_names[i]);
-		if (add) free(add);
-		if (port) free(port);
+	for (i = 1; i < nfds; ++i) {
+		close_listener(i);
 	}
 	free(arg);
 	return NULL;

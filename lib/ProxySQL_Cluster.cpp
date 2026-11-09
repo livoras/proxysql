@@ -1,3 +1,4 @@
+#include <cinttypes>
 #include <utility>
 
 #include "proxysql.h"
@@ -354,7 +355,7 @@ void ProxySQL_Node_Entry::resolve_hostname() {
 		const std::string& ip = MySQL_Monitor::dns_lookup(hostname, false, &ip_count);
 
 		if (ip_count > 1) {
-			proxy_warning("ProxySQL Cluster node '%s' has more than one (%ld) mapped IP address: under some circumstances this may lead to undefined behavior. It is recommended to provide IP address or hostname with only one resolvable IP.\n",
+			proxy_warning("ProxySQL Cluster node '%s' has more than one (%zu) mapped IP address: under some circumstances this may lead to undefined behavior. It is recommended to provide IP address or hostname with only one resolvable IP.\n",
 				hostname, ip_count);
 		}
 
@@ -3570,9 +3571,9 @@ SQLite3_result * ProxySQL_Cluster_Nodes::stats_proxysql_servers_checksums() {
 			sprintf(buf,"%llu", v->epoch);
 			pta[4]=strdup(buf);
 			pta[5]=strdup(v->checksum);
-			sprintf(buf,"%ld", v->last_changed);
+			sprintf(buf,"%lld", static_cast<long long>(v->last_changed));
 			pta[6]=strdup(buf);
-			sprintf(buf,"%ld", v->last_updated);
+			sprintf(buf,"%lld", static_cast<long long>(v->last_updated));
 			pta[7]=strdup(buf);
 			sprintf(buf,"%u", v->diff_check);
 			pta[8]=strdup(buf);
@@ -3615,7 +3616,7 @@ SQLite3_result * ProxySQL_Cluster_Nodes::stats_proxysql_servers_metrics() {
 		pta[0]=strdup(node->get_hostname());
 		sprintf(buf,"%d", node->get_port());
 		pta[1]=strdup(buf);
-		sprintf(buf,"%lu", node->get_weight());
+		sprintf(buf,"%" PRIu64, node->get_weight());
 		pta[2]=strdup(buf);
 		pta[3]=strdup(node->get_comment());
 		ProxySQL_Node_Metrics *curr = node->get_metrics_curr();
@@ -3661,7 +3662,7 @@ SQLite3_result * ProxySQL_Cluster_Nodes::dump_table_proxysql_servers() {
 		pta[0]=strdup(node->get_hostname());
 		sprintf(buf,"%d", node->get_port());
 		pta[1]=strdup(buf);
-		sprintf(buf,"%lu", node->get_weight());
+		sprintf(buf,"%" PRIu64, node->get_weight());
 		pta[2]=strdup(buf);
 		pta[3]=strdup(node->get_comment());
 		result->add_row(pta);
@@ -4474,7 +4475,7 @@ void ProxySQL_Node_Address::resolve_hostname() {
 		const std::string& ip = MySQL_Monitor::dns_lookup(hostname, false, &ip_count);
 
 		if (ip_count > 1) {
-			proxy_error("Proxy cluster node '%s' has more than one ('%ld') mapped IP address. It is recommended to provide IP address or domain with one resolvable IP address.\n",
+			proxy_error("Proxy cluster node '%s' has more than one ('%zu') mapped IP address. It is recommended to provide IP address or domain with one resolvable IP address.\n",
 				hostname, ip_count);
 		}
 

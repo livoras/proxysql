@@ -1,3 +1,4 @@
+#include <cinttypes>
 #include <iostream>     // std::cout
 #include <sstream>      // std::stringstream
 #include <fstream>
@@ -4491,7 +4492,7 @@ void admin_session_handler(MySQL_Session *sess, void *_pa, PtrSize_t *pkt) {
 		if ((query_no_space_length == strlen("SELECT GLOBAL_CHECKSUM()")) && (!strncasecmp("SELECT GLOBAL_CHECKSUM()", query_no_space, strlen("SELECT GLOBAL_CHECKSUM()")))) {
 			char buf[32];
 			pthread_mutex_lock(&GloVars.checksum_mutex);
-			sprintf(buf,"%lu",GloVars.checksums_values.global_checksum);
+			sprintf(buf,"%" PRIu64,GloVars.checksums_values.global_checksum);
 			pthread_mutex_unlock(&GloVars.checksum_mutex);
 			uint16_t setStatus = 0;
 			MySQL_Data_Stream *myds=sess->client_myds;
@@ -5736,9 +5737,15 @@ static void * admin_main_loop(void *arg)
 	int *callback_func=((struct _main_args *)arg)->callback_func;
 	volatile int *shutdown=((struct _main_args *)arg)->shutdown;
 	fds[nfds++] = { GloAdmin->poll_wakeup_handle(), POLLIN, 0 };
-	char *socket_names[MAX_ADMIN_LISTENERS];
+	std::string socket_names[MAX_ADMIN_LISTENERS];
+	bool unix_sockets[MAX_ADMIN_LISTENERS] {};
+	const auto close_listener = [&](int index) {
+		proxysql_socket_close(fds[index].fd);
+		if (unix_sockets[index]) {
+			unlink(socket_names[index].c_str());
+		}
+	};
 	set_thread_name("Admin");
-	for (i=0;i<MAX_ADMIN_LISTENERS;i++) { socket_names[i]=NULL; }
 	pthread_attr_t attr;
   pthread_attr_init(&attr);
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
@@ -5821,7 +5828,7 @@ __end_while_pool:
 					if (resultset) {
 						SQLite3_result * resultset2 = NULL;
 
-					// In debug, run the code to generate metrics so that it can be tested even if the web interface plugin isn't loaded.
+					// In debug, run the code to generate metrics so that it can be tested even if the web listener_spec plugin isn't loaded.
 					#ifdef DEBUG
 						if (true) {
 					#else
@@ -5874,71 +5881,58 @@ __end_while_pool:
 		if (S_amll.get_version()!=version) {
 			S_amll.wrlock();
 			version=S_amll.get_version();
-			for (i=1; i<nfds; i++) {
-				char *add=NULL; char *port=NULL;
-				proxysql_socket_close(fds[i].fd);
-				c_split_2(socket_names[i], ":" , &add, &port);
-				if (atoi(port)==0) {
-					if (socket_names[i]) {
-						unlink(socket_names[i]);
-						socket_names[i]=NULL;
+			auto *interfaces = S_amll.ifaces_mysql->ifaces;
+			// Windows may keep the port reserved while accepted connections are active.
+			for (i = nfds - 1; i > 0; --i) {
+				bool retained = false;
+				for (unsigned int j = 0; j < interfaces->len; ++j) {
+					if (socket_names[i] == static_cast<const char *>(interfaces->index(j))) {
+						retained = true;
+						break;
+					}
+				}
+				if (!retained) {
+					close_listener(i);
+					--nfds;
+					if (i != nfds) {
+						fds[i] = fds[nfds];
+						callback_func[i] = callback_func[nfds];
+						socket_names[i] = std::move(socket_names[nfds]);
+						unix_sockets[i] = unix_sockets[nfds];
 					}
 				}
 			}
-			nfds=0;
-			fds[nfds].fd=GloAdmin->poll_wakeup_handle();
-			fds[nfds].events=POLLIN;
-			fds[nfds].revents=0;
-			nfds++;
-			unsigned int j;
-			i=0; j=0;
-			for (j=0; j<S_amll.ifaces_mysql->ifaces->len; j++) {
-				char *add=NULL; char *port=NULL; char *sn=(char *)S_amll.ifaces_mysql->ifaces->index(j);
-				bool is_ipv6 = false;
-				char *h = NULL;
-				if (*sn == '[') {
-					is_ipv6 = true;
-					char *p = strchr(sn, ']');
-					if (p == NULL)
-						proxy_error("Invalid IPv6 address: %s\n", sn);
-
-					h = ++sn; // remove first '['
-					*p = '\0';
-					sn = p++; // remove last ']'
-					add = h;
-					port = ++p; // remove ':'
-				} else {
-					c_split_2(sn, ":" , &add, &port);
+			for (unsigned int j = 0; j < interfaces->len; ++j) {
+				const auto *listener_spec = static_cast<const char *>(interfaces->index(j));
+				if (std::find(socket_names + 1, socket_names + nfds, listener_spec) != socket_names + nfds) {
+					continue;
 				}
-
-#ifdef SO_REUSEPORT
-				ProxySQL_Socket s = ( atoi(port) ? listen_on_port(add, atoi(port), 128, true) : listen_on_unix(add, 128));
-#else
-				ProxySQL_Socket s = ( atoi(port) ? listen_on_port(add, atoi(port), 128) : listen_on_unix(add, 128));
-#endif
-				if (s != PROXYSQL_INVALID_SOCKET) { fds[nfds].fd=s; fds[nfds].events=POLLIN; fds[nfds].revents=0; callback_func[nfds]=0; socket_names[nfds]=strdup(sn); nfds++; }
-				if (is_ipv6 == false) {
-					if (add) free(add);
-					if (port) free(port);
+				if (nfds == MAX_ADMIN_LISTENERS) {
+					proxy_error("Too many admin listeners\n");
+					break;
+				}
+				ProxySQL_Listener_Address endpoint;
+				if (!parse_listener_address(listener_spec, endpoint)) {
+					proxy_error("Invalid admin listener address: %s\n", listener_spec);
+					continue;
+				}
+				const auto socket = endpoint.port
+					? listen_on_port(endpoint.host.c_str(), endpoint.port, 128, true)
+					: listen_on_unix(endpoint.host.c_str(), 128);
+				if (socket != PROXYSQL_INVALID_SOCKET) {
+					fds[nfds] = { socket, POLLIN, 0 };
+					callback_func[nfds] = 0;
+					socket_names[nfds] = listener_spec;
+					unix_sockets[nfds] = endpoint.port == 0;
+					++nfds;
 				}
 			}
 			S_amll.wrunlock();
 		}
 
 	}
-	//if (__sync_add_and_fetch(shutdown,0)==0) __sync_add_and_fetch(shutdown,1);
-	for (i=1; i<nfds; i++) {
-		char *add=NULL; char *port=NULL;
-		proxysql_socket_close(fds[i].fd);
-		c_split_2(socket_names[i], ":" , &add, &port);
-		if (atoi(port)==0) {
-			if (socket_names[i]) {
-				unlink(socket_names[i]);
-			}
-		}
-		if (socket_names[i]) free(socket_names[i]);
-		if (add) free(add);
-		if (port) free(port);
+	for (i = 1; i < nfds; ++i) {
+		close_listener(i);
 	}
 	free(arg);
 	return NULL;
@@ -6269,7 +6263,7 @@ string build_boot_servers_insert(const vector<boot_srv_cnf_t>& srvs_info_defs) {
 		const boot_srv_info_t& srv_info = info_defs.first;
 		const srv_defs_t& srv_defs = info_defs.second;
 
-		const char t_values[] { "(%d, \"%s\", %d, \"%s\", %ld, %ld, %d)" };
+		const char t_values[] { "(%d, \"%s\", %d, \"%s\", %" PRId64 ", %" PRId64 ", %d)" };
 		string srv_values = cstr_format(
 			t_values,
 			srv_info.member_role == "PRIMARY" ? 0 : 1, // HOSTGROUP_ID
@@ -7184,13 +7178,12 @@ std::shared_ptr<httpserver::http_response> make_response(
  * @param free Output parameter. True if the port is free, false otherwise.
  *
  * @return Returns:
- *     - '-1' in case 'SO_REUSEADDR' fails to be set for the check.
+ *     - '-1' if the test socket cannot be prepared.
  *     - '-2' in case of invalid arguments supplied.
  *     - '0' otherwise.
  */
 int check_port_availability(int port_num, bool* port_free) {
 	int ecode = 0;
-	int sfd = 0;
 	int reuseaddr = 1;
 	struct sockaddr_in tmp_addr;
 
@@ -7201,23 +7194,26 @@ int check_port_availability(int port_num, bool* port_free) {
 	// set 'port_free' to false by default
 	*port_free = false;
 
-	sfd = socket(AF_INET, SOCK_STREAM, 0);
+	const auto sfd = proxysql_socket_open(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (sfd == PROXYSQL_INVALID_SOCKET) {
+		return -1;
+	}
 	memset(&tmp_addr, 0, sizeof(tmp_addr));
 	tmp_addr.sin_family = AF_INET;
 	tmp_addr.sin_port = htons(port_num);
 	tmp_addr.sin_addr.s_addr = INADDR_ANY;
 
-	if (setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, (char *)&reuseaddr, sizeof(reuseaddr)) == -1) {
-		close(sfd);
+#ifdef _WIN32
+	const int option = SO_EXCLUSIVEADDRUSE;
+#else
+	const int option = SO_REUSEADDR;
+#endif
+	if (setsockopt(sfd, SOL_SOCKET, option, reinterpret_cast<const char *>(&reuseaddr), sizeof(reuseaddr)) == -1) {
 		ecode = -1;
 	} else {
-		if (::bind(sfd, (struct sockaddr*)&tmp_addr, sizeof(tmp_addr)) == -1) {
-			close(sfd);
-		} else {
-			*port_free = true;
-			close(sfd);
-		}
+		*port_free = ::bind(sfd, reinterpret_cast<sockaddr *>(&tmp_addr), sizeof(tmp_addr)) == 0;
 	}
+	proxysql_socket_close(sfd);
 
 	return ecode;
 }
@@ -7321,7 +7317,7 @@ void ProxySQL_Admin::load_restapi_server() {
 
 		if (restapi_port_free == false) {
 			if (e_port_check == -1) {
-				proxy_error("Unable to start 'ProxySQL_RestAPI_Server', failed to set 'SO_REUSEADDR' to check port availability.\n");
+				proxy_error("Unable to start 'ProxySQL_RestAPI_Server', failed to prepare a socket to check port availability.\n");
 			} else {
 				proxy_error(
 					"Unable to start 'ProxySQL_RestAPI_Server', port '%d' already in use.\n",
@@ -9678,13 +9674,13 @@ void ProxySQL_Admin::stats___memory_metrics() {
 			uint64_t prep_stmt_backend_mem_usage;
 			GloMyStmt->get_memory_usage(prep_stmt_metadata_mem_usage, prep_stmt_backend_mem_usage);
 			vn = (char*)"prepare_statement_metadata_memory";
-			sprintf(bu, "%lu", prep_stmt_metadata_mem_usage);
+			sprintf(bu, "%" PRIu64, prep_stmt_metadata_mem_usage);
 			query=(char*)malloc(strlen(a)+strlen(vn)+strlen(bu)+16);
 			sprintf(query, a, vn, bu);
 			statsdb->execute(query);
 			free(query);
 			vn = (char*)"prepare_statement_backend_memory";
-			sprintf(bu, "%lu", prep_stmt_backend_mem_usage);
+			sprintf(bu, "%" PRIu64, prep_stmt_backend_mem_usage);
 			query=(char*)malloc(strlen(a)+strlen(vn)+strlen(bu)+16);
 			sprintf(query, a, vn, bu);
 			statsdb->execute(query);
@@ -9845,37 +9841,37 @@ void ProxySQL_Admin::stats___mysql_global() {
 		uint64_t stmt_server_active_total = 0;
 		GloMyStmt->get_metrics(&stmt_client_active_unique,&stmt_client_active_total,&stmt_max_stmt_id,&stmt_cached,&stmt_server_active_unique,&stmt_server_active_total);
 		vn=(char *)"Stmt_Client_Active_Total";
-		sprintf(bu,"%lu",stmt_client_active_total);
+		sprintf(bu,"%" PRIu64,stmt_client_active_total);
 		query=(char *)malloc(strlen(a)+strlen(vn)+strlen(bu)+16);
 		sprintf(query,a,vn,bu);
 		statsdb->execute(query);
 		free(query);
 		vn=(char *)"Stmt_Client_Active_Unique";
-		sprintf(bu,"%lu",stmt_client_active_unique);
+		sprintf(bu,"%" PRIu64,stmt_client_active_unique);
 		query=(char *)malloc(strlen(a)+strlen(vn)+strlen(bu)+16);
 		sprintf(query,a,vn,bu);
 		statsdb->execute(query);
 		free(query);
 		vn=(char *)"Stmt_Server_Active_Total";
-		sprintf(bu,"%lu",stmt_server_active_total);
+		sprintf(bu,"%" PRIu64,stmt_server_active_total);
 		query=(char *)malloc(strlen(a)+strlen(vn)+strlen(bu)+16);
 		sprintf(query,a,vn,bu);
 		statsdb->execute(query);
 		free(query);
 		vn=(char *)"Stmt_Server_Active_Unique";
-		sprintf(bu,"%lu",stmt_server_active_unique);
+		sprintf(bu,"%" PRIu64,stmt_server_active_unique);
 		query=(char *)malloc(strlen(a)+strlen(vn)+strlen(bu)+16);
 		sprintf(query,a,vn,bu);
 		statsdb->execute(query);
 		free(query);
 		vn=(char *)"Stmt_Max_Stmt_id";
-		sprintf(bu,"%lu",stmt_max_stmt_id);
+		sprintf(bu,"%" PRIu64,stmt_max_stmt_id);
 		query=(char *)malloc(strlen(a)+strlen(vn)+strlen(bu)+16);
 		sprintf(query,a,vn,bu);
 		statsdb->execute(query);
 		free(query);
 		vn=(char *)"Stmt_Cached";
-		sprintf(bu,"%lu",stmt_cached);
+		sprintf(bu,"%" PRIu64,stmt_cached);
 		query=(char *)malloc(strlen(a)+strlen(vn)+strlen(bu)+16);
 		sprintf(query,a,vn,bu);
 		statsdb->execute(query);
@@ -13319,7 +13315,7 @@ char* ProxySQL_Admin::load_mysql_query_rules_to_runtime(SQLite3_result* SQLite3_
 		unsigned long long curtime2 = monotonic_time();
 		unsigned long long elapsed_ms = (curtime2/1000) - (curtime1/1000);
 		if (elapsed_ms > 5) {
-			proxy_info("Query processor locked for %llums\n", curtime2 - curtime1);
+			proxy_info("Query processor locked for %llums\n", elapsed_ms);
 		}
 
 		// Free previous 'fast_routing' structures outside of critical section

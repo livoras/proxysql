@@ -1202,13 +1202,13 @@ handler_again:
 			if (!ret_mysql) {
 				int myerr = mysql_errno(mysql);
 				if (ssl_params != NULL && myerr == 2026) {
-					proxy_error("Failed to mysql_real_connect() on %u:%s:%d , FD (Conn:%d , MyDS:%d) , %d: %s. SSL Params: %s , %s , %s , %s , %s , %s , %s , %s\n",
-						parent->myhgc->hid, parent->address, parent->port, mysql->net.fd , myds->fd, mysql_errno(mysql), mysql_error(mysql),
+					proxy_error("Failed to mysql_real_connect() on %u:%s:%d , FD (Conn:%lld , MyDS:%lld) , %d: %s. SSL Params: %s , %s , %s , %s , %s , %s , %s , %s\n",
+						parent->myhgc->hid, parent->address, parent->port, static_cast<long long>(mysql->net.fd) , static_cast<long long>(myds->fd), mysql_errno(mysql), mysql_error(mysql),
 						ssl_params->ssl_ca.c_str() , ssl_params->ssl_cert.c_str() , ssl_params->ssl_key.c_str() , ssl_params->ssl_capath.c_str() ,
 						ssl_params->ssl_crl.c_str() , ssl_params->ssl_crlpath.c_str() , ssl_params->ssl_cipher.c_str() , ssl_params->tls_version.c_str()
 					);
 				} else {
-					proxy_error("Failed to mysql_real_connect() on %u:%s:%d , FD (Conn:%d , MyDS:%d) , %d: %s.\n", parent->myhgc->hid, parent->address, parent->port, mysql->net.fd , myds->fd, mysql_errno(mysql), mysql_error(mysql));
+					proxy_error("Failed to mysql_real_connect() on %u:%s:%d , FD (Conn:%lld , MyDS:%lld) , %d: %s.\n", parent->myhgc->hid, parent->address, parent->port, static_cast<long long>(mysql->net.fd) , static_cast<long long>(myds->fd), mysql_errno(mysql), mysql_error(mysql));
 				}
 				if (ssl_params != NULL) {
 					delete ssl_params;
@@ -2931,11 +2931,10 @@ void MySQL_Connection::optimize() {
 	}
 }
 
-// close_mysql() is a replacement for mysql_close()
-// if avoids that a QUIT command stops forever
-// FIXME: currently doesn't support encryption and compression
+// Send QUIT directly only when the wire protocol is plain and uncompressed.
+// Close without blocking on Connector/C writes for all other connections.
 void MySQL_Connection::close_mysql() {
-	if ((send_quit) && (mysql->net.pvio) && ret_mysql) {
+	if (send_quit && mysql->net.pvio && ret_mysql && !mysql->net.pvio->ctls && !mysql->net.compress) {
 		char buff[5];
 		mysql_hdr myhdr;
 		myhdr.pkt_id=0;

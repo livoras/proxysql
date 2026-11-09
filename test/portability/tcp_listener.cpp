@@ -18,6 +18,16 @@ static bool wait_readable(pollfd &descriptor) {
 }
 
 int main() {
+	ProxySQL_Listener_Address endpoint;
+	const char listener_spec[] = "[::1]:6033";
+	if (!parse_listener_address(listener_spec, endpoint) || endpoint.host != "::1" || endpoint.port != 6033 ||
+		!parse_listener_address("127.0.0.1:6032", endpoint) || endpoint.host != "127.0.0.1" || endpoint.port != 6032 ||
+		!parse_listener_address("/tmp/proxysql.sock", endpoint) || endpoint.host != "/tmp/proxysql.sock" || endpoint.port != 0 ||
+		parse_listener_address("[::1", endpoint) || parse_listener_address("127.0.0.1:65536", endpoint) ||
+		parse_listener_address("[::1]6033", endpoint) || parse_listener_address("127.0.0.1:6033extra", endpoint)) {
+		std::fputs("Incorrect listener address parsing\n", stderr);
+		return 1;
+	}
 	const auto listener = listen_on_port("127.0.0.1", 0, 4);
 	sockaddr_in address {};
 	socklen_t length = sizeof(address);

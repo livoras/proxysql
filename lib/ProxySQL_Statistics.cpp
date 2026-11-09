@@ -559,26 +559,26 @@ void ProxySQL_Statistics::system_cpu_sets() {
 		} else {
 			char buf[256];
 			if (resultset->rows_count == 0) {
-				sprintf(buf,"INSERT INTO system_cpu_hour SELECT timestamp/3600*3600 , SUM(tms_utime), SUM(tms_stime) FROM system_cpu WHERE timestamp < %ld GROUP BY timestamp/3600", (ts/3600)*3600);
+				sprintf(buf,"INSERT INTO system_cpu_hour SELECT timestamp/3600*3600 , SUM(tms_utime), SUM(tms_stime) FROM system_cpu WHERE timestamp < %lld GROUP BY timestamp/3600", static_cast<long long>((ts/3600)*3600));
 				statsdb_disk->execute(buf);
 			} else {
 				SQLite3_row *r = resultset->rows[0];
 				if (r->fields[0]) {
-					time_t t = atol(r->fields[0]);
+					time_t t = atoll(r->fields[0]);
 					if (ts >= t + 3600) {
-						sprintf(buf,"INSERT INTO system_cpu_hour SELECT timestamp/3600*3600 , SUM(tms_utime), SUM(tms_stime) FROM system_cpu WHERE timestamp >= %ld AND timestamp < %ld GROUP BY timestamp/3600", t+3600 , (ts/3600)*3600);
+						sprintf(buf,"INSERT INTO system_cpu_hour SELECT timestamp/3600*3600 , SUM(tms_utime), SUM(tms_stime) FROM system_cpu WHERE timestamp >= %lld AND timestamp < %lld GROUP BY timestamp/3600", static_cast<long long>(t+3600) , static_cast<long long>((ts/3600)*3600));
 						statsdb_disk->execute(buf);
 					}
 				} else {
-					sprintf(buf,"INSERT INTO system_cpu_hour SELECT timestamp/3600*3600 , SUM(tms_utime), SUM(tms_stime) FROM system_cpu WHERE timestamp < %ld GROUP BY timestamp/3600", (ts/3600)*3600);
+					sprintf(buf,"INSERT INTO system_cpu_hour SELECT timestamp/3600*3600 , SUM(tms_utime), SUM(tms_stime) FROM system_cpu WHERE timestamp < %lld GROUP BY timestamp/3600", static_cast<long long>((ts/3600)*3600));
 					statsdb_disk->execute(buf);
 				}
 			}
 			delete resultset;
 			resultset = NULL;
-			sprintf(buf,"DELETE FROM system_cpu WHERE timestamp < %ld", ts - 3600*24*7);
+			sprintf(buf,"DELETE FROM system_cpu WHERE timestamp < %lld", static_cast<long long>(ts - 3600*24*7));
 			statsdb_disk->execute(buf);
-			sprintf(buf,"DELETE FROM system_cpu_hour WHERE timestamp < %ld", ts - 3600*24*365);
+			sprintf(buf,"DELETE FROM system_cpu_hour WHERE timestamp < %lld", static_cast<long long>(ts - 3600*24*365));
 			statsdb_disk->execute(buf);
 		}
 	}
@@ -644,7 +644,7 @@ void ProxySQL_Statistics::system_memory_sets() {
 			} else {
 				SQLite3_row *r = resultset->rows[0];
 				if (r->fields[0]) {
-					time_t t = atol(r->fields[0]);
+					time_t t = atoll(r->fields[0]);
 					if (ts >= t + 3600) {
 						sprintf(buf,"INSERT INTO system_memory_hour SELECT timestamp/3600*3600 , AVG(allocated), AVG(resident), AVG(active), AVG(mapped), AVG(metadata), AVG(retained) FROM system_memory WHERE timestamp >= %ld AND timestamp < %ld GROUP BY timestamp/3600", t+3600 , (ts/3600)*3600);
 						statsdb_disk->execute(buf);
@@ -792,26 +792,26 @@ void ProxySQL_Statistics::MyHGM_Handler_sets_v1(SQLite3_result *resultset) {
 	} else {
 		char buf[1024];
 		if (resultset2->rows_count == 0) {
-			sprintf(buf,"INSERT INTO myhgm_connections_hour SELECT timestamp/3600*3600 , MAX(MyHGM_myconnpoll_destroy), MAX(MyHGM_myconnpoll_get), MAX(MyHGM_myconnpoll_get_ok), MAX(MyHGM_myconnpoll_push), MAX(MyHGM_myconnpoll_reset) FROM myhgm_connections WHERE timestamp < %ld GROUP BY timestamp/3600", (ts/3600)*3600);
+			sprintf(buf,"INSERT INTO myhgm_connections_hour SELECT timestamp/3600*3600 , MAX(MyHGM_myconnpoll_destroy), MAX(MyHGM_myconnpoll_get), MAX(MyHGM_myconnpoll_get_ok), MAX(MyHGM_myconnpoll_push), MAX(MyHGM_myconnpoll_reset) FROM myhgm_connections WHERE timestamp < %lld GROUP BY timestamp/3600", static_cast<long long>((ts/3600)*3600));
 			statsdb_disk->execute(buf);
 		} else {
 			SQLite3_row *r = resultset2->rows[0];
 			if (r->fields[0]) {
-				time_t t = atol(r->fields[0]);
+				time_t t = atoll(r->fields[0]);
 				if (ts >= t + 3600) {
-					sprintf(buf,"INSERT INTO myhgm_connections_hour SELECT timestamp/3600*3600 , MAX(MyHGM_myconnpoll_destroy), MAX(MyHGM_myconnpoll_get), MAX(MyHGM_myconnpoll_get_ok), MAX(MyHGM_myconnpoll_push), MAX(MyHGM_myconnpoll_reset) FROM myhgm_connections WHERE timestamp >= %ld AND timestamp < %ld GROUP BY timestamp/3600", t+3600 , (ts/3600)*3600);
+					sprintf(buf,"INSERT INTO myhgm_connections_hour SELECT timestamp/3600*3600 , MAX(MyHGM_myconnpoll_destroy), MAX(MyHGM_myconnpoll_get), MAX(MyHGM_myconnpoll_get_ok), MAX(MyHGM_myconnpoll_push), MAX(MyHGM_myconnpoll_reset) FROM myhgm_connections WHERE timestamp >= %lld AND timestamp < %lld GROUP BY timestamp/3600", static_cast<long long>(t+3600) , static_cast<long long>((ts/3600)*3600));
 					statsdb_disk->execute(buf);
 				}
 			} else {
-				sprintf(buf,"INSERT INTO myhgm_connections_hour SELECT timestamp/3600*3600 , MAX(MyHGM_myconnpoll_destroy), MAX(MyHGM_myconnpoll_get), MAX(MyHGM_myconnpoll_get_ok), MAX(MyHGM_myconnpoll_push), MAX(MyHGM_myconnpoll_reset) FROM myhgm_connections WHERE timestamp < %ld GROUP BY timestamp/3600", (ts/3600)*3600);
+				sprintf(buf,"INSERT INTO myhgm_connections_hour SELECT timestamp/3600*3600 , MAX(MyHGM_myconnpoll_destroy), MAX(MyHGM_myconnpoll_get), MAX(MyHGM_myconnpoll_get_ok), MAX(MyHGM_myconnpoll_push), MAX(MyHGM_myconnpoll_reset) FROM myhgm_connections WHERE timestamp < %lld GROUP BY timestamp/3600", static_cast<long long>((ts/3600)*3600));
 				statsdb_disk->execute(buf);
 			}
 		}
 		delete resultset2;
 		resultset2 = NULL;
-		sprintf(buf,"DELETE FROM myhgm_connections WHERE timestamp < %ld", ts - 3600*24*7);
+		sprintf(buf,"DELETE FROM myhgm_connections WHERE timestamp < %lld", static_cast<long long>(ts - 3600*24*7));
 		statsdb_disk->execute(buf);
-		sprintf(buf,"DELETE FROM myhgm_connections_hour WHERE timestamp < %ld", ts - 3600*24*365);
+		sprintf(buf,"DELETE FROM myhgm_connections_hour WHERE timestamp < %lld", static_cast<long long>(ts - 3600*24*365));
 		statsdb_disk->execute(buf);
 	}
 }
@@ -977,26 +977,26 @@ void ProxySQL_Statistics::MySQL_Threads_Handler_sets_v1(SQLite3_result *resultse
 	} else {
 		char buf[1024];
 		if (resultset2->rows_count == 0) {
-			sprintf(buf,"INSERT INTO mysql_connections_hour SELECT timestamp/3600*3600 , MAX(Client_Connections_aborted), AVG(Client_Connections_connected), MAX(Client_Connections_created), MAX(Server_Connections_aborted), AVG(Server_Connections_connected), MAX(Server_Connections_created), MAX(ConnPool_get_conn_failure), MAX(ConnPool_get_conn_immediate), MAX(ConnPool_get_conn_success), MAX(Questions), MAX(Slow_queries), MAX(GTID_consistent_queries) FROM mysql_connections WHERE timestamp < %ld GROUP BY timestamp/3600", (ts/3600)*3600);
+			sprintf(buf,"INSERT INTO mysql_connections_hour SELECT timestamp/3600*3600 , MAX(Client_Connections_aborted), AVG(Client_Connections_connected), MAX(Client_Connections_created), MAX(Server_Connections_aborted), AVG(Server_Connections_connected), MAX(Server_Connections_created), MAX(ConnPool_get_conn_failure), MAX(ConnPool_get_conn_immediate), MAX(ConnPool_get_conn_success), MAX(Questions), MAX(Slow_queries), MAX(GTID_consistent_queries) FROM mysql_connections WHERE timestamp < %lld GROUP BY timestamp/3600", static_cast<long long>((ts/3600)*3600));
 			statsdb_disk->execute(buf);
 		} else {
 			SQLite3_row *r = resultset2->rows[0];
 			if (r->fields[0]) {
-				time_t t = atol(r->fields[0]);
+				time_t t = atoll(r->fields[0]);
 				if (ts >= t + 3600) {
-					sprintf(buf,"INSERT INTO mysql_connections_hour SELECT timestamp/3600*3600 , MAX(Client_Connections_aborted), AVG(Client_Connections_connected), MAX(Client_Connections_created), MAX(Server_Connections_aborted), AVG(Server_Connections_connected), MAX(Server_Connections_created), MAX(ConnPool_get_conn_failure), MAX(ConnPool_get_conn_immediate), MAX(ConnPool_get_conn_success), MAX(Questions), MAX(Slow_queries), MAX(GTID_consistent_queries) FROM mysql_connections WHERE timestamp >= %ld AND timestamp < %ld GROUP BY timestamp/3600", t+3600 , (ts/3600)*3600);
+					sprintf(buf,"INSERT INTO mysql_connections_hour SELECT timestamp/3600*3600 , MAX(Client_Connections_aborted), AVG(Client_Connections_connected), MAX(Client_Connections_created), MAX(Server_Connections_aborted), AVG(Server_Connections_connected), MAX(Server_Connections_created), MAX(ConnPool_get_conn_failure), MAX(ConnPool_get_conn_immediate), MAX(ConnPool_get_conn_success), MAX(Questions), MAX(Slow_queries), MAX(GTID_consistent_queries) FROM mysql_connections WHERE timestamp >= %lld AND timestamp < %lld GROUP BY timestamp/3600", static_cast<long long>(t+3600) , static_cast<long long>((ts/3600)*3600));
 					statsdb_disk->execute(buf);
 				}
 			} else {
-				sprintf(buf,"INSERT INTO mysql_connections_hour SELECT timestamp/3600*3600 , MAX(Client_Connections_aborted), AVG(Client_Connections_connected), MAX(Client_Connections_created), MAX(Server_Connections_aborted), AVG(Server_Connections_connected), MAX(Server_Connections_created), MAX(ConnPool_get_conn_failure), MAX(ConnPool_get_conn_immediate), MAX(ConnPool_get_conn_success), MAX(Questions), MAX(Slow_queries), MAX(GTID_consistent_queries) FROM mysql_connections WHERE timestamp < %ld GROUP BY timestamp/3600", (ts/3600)*3600);
+				sprintf(buf,"INSERT INTO mysql_connections_hour SELECT timestamp/3600*3600 , MAX(Client_Connections_aborted), AVG(Client_Connections_connected), MAX(Client_Connections_created), MAX(Server_Connections_aborted), AVG(Server_Connections_connected), MAX(Server_Connections_created), MAX(ConnPool_get_conn_failure), MAX(ConnPool_get_conn_immediate), MAX(ConnPool_get_conn_success), MAX(Questions), MAX(Slow_queries), MAX(GTID_consistent_queries) FROM mysql_connections WHERE timestamp < %lld GROUP BY timestamp/3600", static_cast<long long>((ts/3600)*3600));
 				statsdb_disk->execute(buf);
 			}
 		}
 		delete resultset2;
 		resultset2 = NULL;
-		sprintf(buf,"DELETE FROM mysql_connections WHERE timestamp < %ld", ts - 3600*24*7);
+		sprintf(buf,"DELETE FROM mysql_connections WHERE timestamp < %lld", static_cast<long long>(ts - 3600*24*7));
 		statsdb_disk->execute(buf);
-		sprintf(buf,"DELETE FROM mysql_connections_hour WHERE timestamp < %ld", ts - 3600*24*365);
+		sprintf(buf,"DELETE FROM mysql_connections_hour WHERE timestamp < %lld", static_cast<long long>(ts - 3600*24*365));
 		statsdb_disk->execute(buf);
 	}
 }
@@ -1082,26 +1082,26 @@ void ProxySQL_Statistics::MySQL_Query_Cache_sets(SQLite3_result *resultset) {
 	} else {
 		char buf[1024];
 		if (resultset2->rows_count == 0) {
-			sprintf(buf,"INSERT INTO mysql_query_cache_hour SELECT timestamp/3600*3600 , MAX(count_GET), MAX(count_GET_OK), MAX(count_SET), MAX(bytes_IN), MAX(bytes_OUT), MAX(Entries_Purged), AVG(Entries_In_Cache), AVG(Memory_bytes) FROM mysql_query_cache WHERE timestamp < %ld GROUP BY timestamp/3600", (ts/3600)*3600);
+			sprintf(buf,"INSERT INTO mysql_query_cache_hour SELECT timestamp/3600*3600 , MAX(count_GET), MAX(count_GET_OK), MAX(count_SET), MAX(bytes_IN), MAX(bytes_OUT), MAX(Entries_Purged), AVG(Entries_In_Cache), AVG(Memory_bytes) FROM mysql_query_cache WHERE timestamp < %lld GROUP BY timestamp/3600", static_cast<long long>((ts/3600)*3600));
 			statsdb_disk->execute(buf);
 		} else {
 			SQLite3_row *r = resultset2->rows[0];
 			if (r->fields[0]) {
-				time_t t = atol(r->fields[0]);
+				time_t t = atoll(r->fields[0]);
 				if (ts >= t + 3600) {
-					sprintf(buf,"INSERT INTO mysql_query_cache_hour SELECT timestamp/3600*3600 , MAX(count_GET), MAX(count_GET_OK), MAX(count_SET), MAX(bytes_IN), MAX(bytes_OUT), MAX(Entries_Purged), AVG(Entries_In_Cache), AVG(Memory_bytes) FROM mysql_query_cache WHERE timestamp >= %ld AND timestamp < %ld GROUP BY timestamp/3600", t+3600 , (ts/3600)*3600);
+					sprintf(buf,"INSERT INTO mysql_query_cache_hour SELECT timestamp/3600*3600 , MAX(count_GET), MAX(count_GET_OK), MAX(count_SET), MAX(bytes_IN), MAX(bytes_OUT), MAX(Entries_Purged), AVG(Entries_In_Cache), AVG(Memory_bytes) FROM mysql_query_cache WHERE timestamp >= %lld AND timestamp < %lld GROUP BY timestamp/3600", static_cast<long long>(t+3600) , static_cast<long long>((ts/3600)*3600));
 					statsdb_disk->execute(buf);
 				}
 			} else {
-				sprintf(buf,"INSERT INTO mysql_query_cache_hour SELECT timestamp/3600*3600 , MAX(count_GET), MAX(count_GET_OK), MAX(count_SET), MAX(bytes_IN), MAX(bytes_OUT), MAX(Entries_Purged), AVG(Entries_In_Cache), AVG(Memory_bytes) FROM mysql_query_cache WHERE timestamp < %ld GROUP BY timestamp/3600", (ts/3600)*3600);
+				sprintf(buf,"INSERT INTO mysql_query_cache_hour SELECT timestamp/3600*3600 , MAX(count_GET), MAX(count_GET_OK), MAX(count_SET), MAX(bytes_IN), MAX(bytes_OUT), MAX(Entries_Purged), AVG(Entries_In_Cache), AVG(Memory_bytes) FROM mysql_query_cache WHERE timestamp < %lld GROUP BY timestamp/3600", static_cast<long long>((ts/3600)*3600));
 				statsdb_disk->execute(buf);
 			}
 		}
 		delete resultset2;
 		resultset2 = NULL;
-		sprintf(buf,"DELETE FROM mysql_query_cache WHERE timestamp < %ld", ts - 3600*24*7);
+		sprintf(buf,"DELETE FROM mysql_query_cache WHERE timestamp < %lld", static_cast<long long>(ts - 3600*24*7));
 		statsdb_disk->execute(buf);
-		sprintf(buf,"DELETE FROM mysql_query_cache_hour WHERE timestamp < %ld", ts - 3600*24*365);
+		sprintf(buf,"DELETE FROM mysql_query_cache_hour WHERE timestamp < %lld", static_cast<long long>(ts - 3600*24*365));
 		statsdb_disk->execute(buf);
 	}
 }

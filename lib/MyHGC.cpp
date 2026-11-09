@@ -1,3 +1,4 @@
+#include <cinttypes>
 #include "MySQL_HostGroups_Manager.h"
 
 #ifdef TEST_AURORA
@@ -222,7 +223,7 @@ MySrvC *MyHGC::get_random_MySrvC(char * gtid_uuid, uint64_t gtid_trxid, int max_
 				last_hg_log = time(NULL);
 
 				if (gtid_trxid) {
-					proxy_error("Hostgroup %u has no servers ready for GTID '%s:%ld'. Waiting for replication...\n", hid, gtid_uuid, gtid_trxid);
+					proxy_error("Hostgroup %u has no servers ready for GTID '%s:%" PRIu64 "'. Waiting for replication...\n", hid, gtid_uuid, gtid_trxid);
 				} else {
 					proxy_error("Hostgroup %u has no servers available%s! Checking servers shunned for more than %u second%s\n", hid,
 						(max_connections_reached ? " or max_connections reached for all servers" : ""), max_wait_sec, max_wait_sec == 1 ? "" : "s");

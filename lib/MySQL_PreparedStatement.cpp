@@ -1,3 +1,4 @@
+#include <cinttypes>
 #include "proxysql.h"
 #include "cpp.h"
 
@@ -421,7 +422,7 @@ void MySQL_STMT_Global_info::update_metadata(MYSQL_STMT *stmt) {
 		if (digest_text && strncasecmp(digest_text, "EXPLAIN", strlen("EXPLAIN"))==0) {
 			// do not print any message in case of EXPLAIN
 		} else {
-			proxy_warning("Updating metadata for stmt %lu , user %s, query %s\n", statement_id, username, query);
+			proxy_warning("Updating metadata for stmt %" PRIu64 " , user %s, query %s\n", statement_id, username, query);
 		}
 // from here is copied from destructor
 		if (num_columns) {
@@ -985,7 +986,7 @@ class PS_global_stats {
 	char **get_row() {
 		char buf[128];
 		char **pta=(char **)malloc(sizeof(char *)*PS_GLOBAL_STATUS_FIELD_NUM);
-		sprintf(buf,"%lu",statement_id);
+		sprintf(buf,"%" PRIu64,statement_id);
 		pta[0]=strdup(buf);
 		assert(schemaname);
 		pta[1]=strdup(schemaname);
@@ -1001,9 +1002,9 @@ class PS_global_stats {
 		pta[5]=strdup(buf);
 		sprintf(buf,"%llu",ref_count_server);
 		pta[6]=strdup(buf);
-		sprintf(buf,"%lu",num_columns);
+		sprintf(buf,"%" PRIu64,num_columns);
 		pta[7]=strdup(buf);
-		sprintf(buf,"%lu",num_params);
+		sprintf(buf,"%" PRIu64,num_params);
 		pta[8]=strdup(buf);
 
 		return pta;

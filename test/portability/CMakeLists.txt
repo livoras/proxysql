@@ -9,7 +9,7 @@ add_library(proxysql_portable_network STATIC
 	../../lib/ProxySQL_Thread_Wakeup.cpp
 	../../lib/proxysql_socket.cpp
 )
-target_compile_features(proxysql_portable_network PUBLIC cxx_std_11)
+target_compile_features(proxysql_portable_network PUBLIC cxx_std_17)
 target_include_directories(proxysql_portable_network PUBLIC ../../include)
 if(WIN32)
 	target_link_libraries(proxysql_portable_network PUBLIC ws2_32)
